@@ -71,7 +71,7 @@ exports.handler = async (event, context) => {
         type: 'pvz',
         
         // КЛЮЧЕВОЕ: shipping_address для автозаполнения в InSales
-        shipping_address: {
+        shipping_address_address: {
           // Это поле InSales должен использовать для заполнения "Адреса доставки"
           address: pointStreet,  // "ул. Ленина, 15" - только улица и дом
           city: extractCityFromAddress(point.address),
