@@ -3,7 +3,7 @@ const pickupPoints = [
   {
     id: 10201,
     city: "Барановичи",
-    name: "СППС №10201",
+    name: "Барановичи, ул.50 лет БССР, д.31 СППС №10201",
     address: "г.Барановичи, ул.50 лет БССР, д.31",
     working_hours: "Пн-Сб: с 10:00 до 20:00 обед 14:00 до 14:30",
     phone: "+375-163-00-00-00",
@@ -831,7 +831,7 @@ exports.handler = async (event, context) => {
           currency: 'BYN',
           
           // Информация о доставке
-          title: `${point.name}`,
+          title: `${point.name} ${point.address`,
           description: `${point.address} (${point.working_hours})`,
           
           // Интервал доставки
