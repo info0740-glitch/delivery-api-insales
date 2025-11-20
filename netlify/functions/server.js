@@ -84,7 +84,7 @@ exports.handler = async (event, context) => {
           {
             // ПРЯМАЯ привязка к HTML полю InSales
             // name="shipping_address[address]" из скриншота
-            handle: 'shipping_address[address]',
+            id: shipping_address_address,
             value: pointStreet
           },
           {
