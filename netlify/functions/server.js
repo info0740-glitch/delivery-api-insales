@@ -7,24 +7,12 @@ const pickupPoints = [
     longitude: 27.5615,
     shipping_company_handle: 'autolight_express',
     title: 'ПВЗ Минск',
-    type: 'locker',
-    address: 'ул. Ленина, 15',
+    type: 'pvz',
+    address: 'Минск, ул. Ленина, 15',
     description: 'ПВЗ в торговом центре "Минск-Сити"',
     phones: ['+375-29-123-45-67'],
     payment_method: ['CASH', 'CARD'],
-    location: {
-      city: 'Минск',
-      city_type: 'г',
-      area: 'Минская область',
-      area_type: 'обл',
-      country: 'Беларусь',
-      country_type: 'респ',
-      region: 'Минская область',
-      region_type: 'обл',
-      settlement: 'Минск',
-      settlement_type: 'г',
-      kladr_code: '4500000000000'
-    },
+    
     tariffs: [
       {
         id: 'pvz_1',
@@ -50,24 +38,12 @@ const pickupPoints = [
     longitude: 23.9278,
     shipping_company_handle: 'autolight_express',
     title: 'ПВЗ Брест',
-    type: 'locker',
-    address: 'ул. Гоголя, 25',
+    type: 'pvz',
+    address: 'Брест, ул. Гоголя, 25',
     description: 'ПВЗ в торговом центре "Гоголь"',
     phones: ['+375-29-234-56-78'],
     payment_method: ['CASH', 'CARD'],
-    location: {
-      city: 'Брест',
-      city_type: 'г',
-      area: 'Брестская область',
-      area_type: 'обл',
-      country: 'Беларусь',
-      country_type: 'респ',
-      region: 'Брестская область',
-      region_type: 'обл',
-      settlement: 'Брест',
-      settlement_type: 'г',
-      kladr_code: '4500000000000'
-    },
+    
     tariffs: [
       {
         id: 'pvz_2',
