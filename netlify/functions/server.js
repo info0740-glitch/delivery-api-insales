@@ -714,7 +714,7 @@ exports.handler = async (event, context) => {
       // Основной ответ по формату InSales документации
       return {
         // Базовые поля тарифа
-        id: point.id,                    // Добавляем id для pickup points-
+        id: point.id,                    // Добавляем id для pickup points
         tariff_id: `pvz_${point.id}`,    // Обязательное поле для множественных тарифов
         shipping_company_handle: 'autolight_express',
         price: price,
