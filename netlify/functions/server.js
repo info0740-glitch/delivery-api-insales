@@ -50,7 +50,7 @@ exports.handler = async (event, context) => {
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
         'Content-Type': 'application/json'
       },
       body: ''
@@ -61,17 +61,20 @@ exports.handler = async (event, context) => {
     const requestBody = JSON.parse(event.body);
     const { order } = requestBody;
 
-    // Извлекаем город
+    // Извлекаем город из разных возможных источников
     const fullLocalityName = order.shipping_address?.full_locality_name || '';
     const locationCity = order.shipping_address?.location?.city || '';
+    const locationSettlement = order.shipping_address?.location?.settlement || '';
     const shippingCity = order.shipping_address?.city || '';
-    const city = fullLocalityName || locationCity || shippingCity;
-
-    // Получаем вес
+    
+    // Пытаемся определить город по разным полям
+    const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
+    
+    // Получаем вес заказа
     const totalWeightStr = order.total_weight || '0';
     const totalWeight = parseFloat(totalWeightStr) || 0;
 
-    // Фильтруем ПВЗ
+    // Фильтруем ПВЗ по городу
     let filteredPoints = pickupPoints;
     if (city && city.trim()) {
       const cityNameToMatch = city.toLowerCase().trim();
@@ -86,71 +89,94 @@ exports.handler = async (event, context) => {
     const tariffs = filteredPoints.map(point => {
       const price = calculatePrice(totalWeight);
       
-      const deliveryAddress = point.delivery_address || 
-                             `${point.address}, ${point.city}, Беларусь`;
+      // Формируем полный адрес для full_locality_name
+      const fullAddress = point.delivery_address || 
+                         `${point.address}, ${point.city}, Беларусь`;
 
+      // Основной ответ по формату InSales документации
       return {
+        // Базовые поля тарифа
+        id: point.id,                    // Добавляем id для pickup points
+        tariff_id: `pvz_${point.id}`,    // Обязательное поле для множественных тарифов
+        shipping_company_handle: 'autolight_express',
         price: price,
         currency: 'BYN',
+        
+        // Информация о доставке
+        title: `${point.name}`,
+        description: `${point.address} (${point.working_hours})`,
+        
+        // Интервал доставки
         delivery_interval: {
           min_days: 1,
           max_days: 1,
           description: `1 день`
         },
-        tariff_id: `pvz_${point.id}`,
-        shipping_company_handle: 'autolight_express',
-        title: `${point.name}`,
-        description: `${point.address} (${point.working_hours})`,
+        
+        // Координаты (для pickup points)
+        latitude: point.coordinates?.lat || 0,
+        longitude: point.coordinates?.lng || 0,
+        type: 'pvz', // Тип точки выдачи
+        
+        // КРИТИЧНО: Правильный формат shipping_address по документации
         shipping_address: {
-          full_locality_name: deliveryAddress,
-          address: point.address,  // КЛЮЧЕВОЕ: это поле должно заполнить UI
+          // Это поле должно заполнить UI InSales
+          full_locality_name: fullAddress,
+          // Дополнительные поля адреса
+          address: point.address,
           city: point.city,
           country: 'Беларусь',
           postal_code: point.postal_code || '',
-          phone: point.phone || '',
-          latitude: point.coordinates?.lat || 0,
-          longitude: point.coordinates?.lng || 0,
+          
+          // Дополнительная информация для pickup point
           pickup_point_name: point.name,
           pickup_point_hours: point.working_hours,
           pickup_point_phone: point.phone
         },
+        
+        // КРИТИЧНО: fields_values по официальному формату документации
         fields_values: [
           {
-            // Попытка заполнить поле через shipping_address в shipping_address
-            name: 'shipping_address[address]',
-            value: point.address
-          },
-          {
-            // Поле для заполнения UI адреса
-            field_id: 'shipping_address_address',
+            // Поле для заполнения адреса в UI (по документации InSales)
             handle: 'shipping_address[address]',
-            name: 'Адрес доставки',
             value: point.address,
-            human_value: point.address
+            name: 'Адрес доставки'
           },
           {
-            // Простое поле для автозаполнения
-            name: 'address',
+            // Альтернативный формат поля адреса
+            handle: 'shipping_address_address',
             value: point.address
+          },
+          {
+            // Поле для полного адреса
+            handle: 'shipping_address[full_locality_name]',
+            value: fullAddress
           },
           {
             // Дополнительное поле с полным адресом
-            name: 'full_locality_name',
-            value: deliveryAddress
+            handle: 'full_locality_name',
+            value: fullAddress
           },
           {
+            // Простое поле адреса
+            handle: 'address',
+            value: fullAddress
+          },
+          {
+            // Поле с ID pickup point
             handle: 'pickup_point_id',
             value: point.id.toString()
           },
           {
-            handle: 'pickup_point_address',
-            value: deliveryAddress
-          },
-          {
-            handle: 'delivery_instructions',
-            value: `Пункт выдачи: ${point.name}. Часы работы: ${point.working_hours}. Тел: ${point.phone}`
+            // Информация о pickup point
+            handle: 'pickup_point_info',
+            value: `ПВЗ: ${point.name}. ${point.address}. Часы: ${point.working_hours}. Тел: ${point.phone}`
           }
         ],
+        
+        // Служебные поля
+        phones: [point.phone || ''],
+        payment_method: ['CASH', 'CARD', 'PREPAID'],
         errors: [],
         warnings: []
       };
@@ -161,7 +187,7 @@ exports.handler = async (event, context) => {
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(tariffs)
@@ -173,10 +199,14 @@ exports.handler = async (event, context) => {
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({ 
+        error: error.message,
+        errors: [error.message],
+        warnings: []
+      })
     };
   }
 };
