@@ -10,7 +10,7 @@ const pickupPoints = [
     title: 'ПВЗ Минск',
     type: 'locker',
     address: 'ул. Ленина, 15',
-    description: 'ПВЗ в торговом центре "Минск-Сити"',
+    
     phones: ['+375-29-123-45-67'],
     payment_method: ['CASH', 'CARD'],
     tariffs: [
@@ -41,7 +41,7 @@ const pickupPoints = [
     title: 'ПВЗ Брест',
     type: 'locker',
     address: 'ул. Гоголя, 25',
-    description: 'ПВЗ в торговом центре "Гоголь"',
+    
     phones: ['+375-29-234-56-78'],
     payment_method: ['CASH', 'CARD'],
     tariffs: [
