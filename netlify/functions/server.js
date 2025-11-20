@@ -1,11 +1,3 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
-
-// CORS для работы с InSales
-app.use(cors());
-app.use(express.json());
-
 // Данные о пунктах выдачи
 const pickupPoints = [
   {
@@ -68,102 +60,165 @@ function calculatePrice(weight) {
   return 40.00;
 }
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Автолайт Экспресс API работает!',
-    timestamp: new Date().toISOString()
-  });
-});
+// Функция для обработки CORS preflight
+function handleCORS() {
+  return {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Content-Type': 'application/json'
+    }
+  };
+}
 
-// Расчет курьерской доставки
-app.post('/api/delivery/calculate', (req, res) => {
-  try {
-    const { order, shipping_address } = req.body;
-    const totalWeight = order?.total_weight || 0;
-    
-    const price = calculatePrice(totalWeight);
-    const deliveryDays = totalWeight <= 5 ? 1 : 2;
-    
-    res.json({
-      price: price,
-      currency: 'BYN',
-      delivery_days: deliveryDays,
-      description: `Доставка курьером (${totalWeight} кг)`
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Ошибка расчета доставки' });
+// Основной обработчик Netlify Function
+exports.handler = async (event, context) => {
+  // Обработка CORS preflight запросов
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      ...handleCORS(),
+      body: ''
+    };
   }
-});
-
-// Список пунктов выдачи по городу
-app.post('/api/pickup-points', (req, res) => {
+  
   try {
-    const { city } = req.body;
+    const { httpMethod, path, body } = event;
     
-    let filteredPoints = pickupPoints;
-    if (city) {
-      filteredPoints = pickupPoints.filter(point => 
-        point.city.toLowerCase().includes(city.toLowerCase())
-      );
+    // Парсим JSON body если он есть
+    let requestBody = {};
+    if (body && body.trim()) {
+      try {
+        requestBody = JSON.parse(body);
+      } catch (e) {
+        console.log('Error parsing JSON:', e);
+        requestBody = {};
+      }
     }
     
-    res.json({
-      pickup_points: filteredPoints.map(point => ({
-        id: point.id,
-        title: point.name,
-        address: point.address,
-        working_hours: point.working_hours,
-        phone: point.phone,
-        city: point.city
-      }))
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Ошибка получения пунктов выдачи' });
-  }
-});
-
-// Расчет для конкретного пункта выдачи
-app.post('/api/pickup-point/calculate', (req, res) => {
-  try {
-    const { order, pickup_point_id } = req.body;
-    const totalWeight = order?.total_weight || 0;
+    // Обработка маршрутов
+    if (path === '/health' && httpMethod === 'GET') {
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          status: 'OK', 
+          message: 'Автолайт Экспресс API работает!',
+          timestamp: new Date().toISOString(),
+          environment: 'netlify'
+        })
+      };
+    }
     
-    const price = calculatePrice(totalWeight);
+    if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
+      const { order, shipping_address } = requestBody;
+      const totalWeight = order?.total_weight || 0;
+      
+      const price = calculatePrice(totalWeight);
+      const deliveryDays = totalWeight <= 5 ? 1 : 2;
+      
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          price: price,
+          currency: 'BYN',
+          delivery_days: deliveryDays,
+          description: `Доставка курьером (${totalWeight} кг)`
+        })
+      };
+    }
     
-    res.json({
-      price: price,
-      currency: 'BYN',
-      delivery_days: 1,
-      description: `Доставка до пункта выдачи (${totalWeight} кг)`
-    });
+    if (path === '/api/pickup-points' && httpMethod === 'POST') {
+      const { city } = requestBody;
+      
+      let filteredPoints = pickupPoints;
+      if (city && city.trim()) {
+        filteredPoints = pickupPoints.filter(point => 
+          point.city.toLowerCase().includes(city.toLowerCase())
+        );
+      }
+      
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          pickup_points: filteredPoints.map(point => ({
+            id: point.id,
+            title: point.name,
+            address: point.address,
+            working_hours: point.working_hours,
+            phone: point.phone,
+            city: point.city
+          }))
+        })
+      };
+    }
+    
+    if (path === '/api/pickup-point/calculate' && httpMethod === 'POST') {
+      const { order, pickup_point_id } = requestBody;
+      const totalWeight = order?.total_weight || 0;
+      
+      const price = calculatePrice(totalWeight);
+      
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          price: price,
+          currency: 'BYN',
+          delivery_days: 1,
+          description: `Доставка до пункта выдачи (${totalWeight} кг)`
+        })
+      };
+    }
+    
+    if (path === '/pickup-points' && httpMethod === 'GET') {
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          pickup_points: pickupPoints.map(point => ({
+            id: point.id,
+            title: point.name,
+            address: point.address,
+            working_hours: point.working_hours,
+            phone: point.phone,
+            city: point.city
+          }))
+        })
+      };
+    }
+    
+    // Если маршрут не найден
+    return {
+      statusCode: 404,
+      ...handleCORS(),
+      body: JSON.stringify({ 
+        error: 'Endpoint not found',
+        path: path,
+        method: httpMethod,
+        available_endpoints: [
+          'GET /health',
+          'POST /api/delivery/calculate',
+          'POST /api/pickup-points',
+          'POST /api/pickup-point/calculate',
+          'GET /pickup-points'
+        ]
+      })
+    };
+    
   } catch (error) {
-    res.status(500).json({ error: 'Ошибка расчета для пункта выдачи' });
-  }
-});
-
-// Все пункты выдачи
-app.get('/pickup-points', (req, res) => {
-  res.json({
-    pickup_points: pickupPoints.map(point => ({
-      id: point.id,
-      title: point.name,
-      address: point.address,
-      working_hours: point.working_hours,
-      phone: point.phone,
-      city: point.city
-    }))
-  });
-});
-
-exports.handler = async (event, context) => {
-  try {
-    return app(req, res);
-  } catch (error) {
+    console.error('Function error:', error);
+    
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Internal Server Error' })
+      ...handleCORS(),
+      body: JSON.stringify({ 
+        error: 'Internal Server Error',
+        message: error.message
+      })
     };
   }
 };
