@@ -103,7 +103,7 @@ exports.handler = async (event, context) => {
         description: `${point.address} (${point.working_hours})`,
         shipping_address: {
           full_locality_name: deliveryAddress,
-          address: point.address,
+          address: point.address,  // КЛЮЧЕВОЕ: это поле должно заполнить UI
           city: point.city,
           country: 'Беларусь',
           postal_code: point.postal_code || '',
@@ -116,12 +116,27 @@ exports.handler = async (event, context) => {
         },
         fields_values: [
           {
-            // КЛЮЧЕВОЕ: поле для заполнения textarea name="shipping_address[address]"
+            // Попытка заполнить поле через shipping_address в shipping_address
+            name: 'shipping_address[address]',
+            value: point.address
+          },
+          {
+            // Поле для заполнения UI адреса
             field_id: 'shipping_address_address',
             handle: 'shipping_address[address]',
             name: 'Адрес доставки',
             value: point.address,
             human_value: point.address
+          },
+          {
+            // Простое поле для автозаполнения
+            name: 'address',
+            value: point.address
+          },
+          {
+            // Дополнительное поле с полным адресом
+            name: 'full_locality_name',
+            value: deliveryAddress
           },
           {
             handle: 'pickup_point_id',
