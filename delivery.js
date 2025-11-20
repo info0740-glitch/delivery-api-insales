@@ -1,6 +1,24 @@
 // JavaScript для доставки в пункт выдачи с расчетом веса
 const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
+// Наблюдаем за изменениями в DOM
+const observer = new MutationObserver(function(mutations) {
+  mutations.forEach(function(mutation) {
+    if (mutation.addedNodes.length > 0) {
+      // Проверяем, добавлен ли контейнер
+      const pickupContainer = findPickupContainer();
+      if (pickupContainer) {
+        observer.disconnect(); // Останавливаем наблюдение
+        setupPickupPointsLoader(); // Инициализируем
+      }
+    }
+  });
+});
 
+// Наблюдаем за всем документом
+observer.observe(document.body, {
+  childList: true,
+  subtree: true
+});
 // Получение пунктов выдачи по городу
 function getPickupPoints(city) {
   const requestBody = {
