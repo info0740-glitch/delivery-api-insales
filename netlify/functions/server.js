@@ -82,10 +82,10 @@ exports.handler = async (event, context) => {
       body: ''
     };
   }
-  
+
   try {
     const { httpMethod, path, body } = event;
-    
+
     // Парсим JSON body если он есть (только для POST)
     let requestBody = {};
     if (body && body.trim()) {
@@ -107,14 +107,14 @@ exports.handler = async (event, context) => {
         statusCode: 200,
         ...handleCORS(),
         body: JSON.stringify({
-          status: 'OK', 
+          status: 'OK',
           message: 'Автолайт Экспресс API работает!',
           timestamp: new Date().toISOString(),
           environment: 'netlify'
         })
       };
     }
-    
+
     // --- ОБНОВЛЕНИЕ: Обработка POST /api/delivery/calculate для v2 API ---
     if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
       console.log('Handling POST /api/delivery/calculate for v2 API');
@@ -122,19 +122,35 @@ exports.handler = async (event, context) => {
 
       // Извлекаем информацию из запроса от InSales
       const order = requestBody.order;
-      const city = order.shipping_address?.full_locality_name || order.shipping_address?.location?.city || '';
-      const totalWeight = parseFloat(order.total_weight) || 0; // Проверяем тип и конвертируем
+      // Используем более надежный способ получения названия города
+      const fullLocalityName = order.shipping_address?.full_locality_name || '';
+      const locationCity = order.shipping_address?.location?.city || '';
+      // Приоритет: сначала full_locality_name, затем location.city
+      const city = fullLocalityName || locationCity;
+      // total_weight может быть строкой, конвертируем
+      const totalWeightStr = order.total_weight || '0';
+      const totalWeight = parseFloat(totalWeightStr) || 0;
 
-      console.log('City:', city);
-      console.log('Total Weight:', totalWeight);
+      console.log('Full Locality Name:', fullLocalityName);
+      console.log('Location City:', locationCity);
+      console.log('Parsed City:', city);
+      console.log('Total Weight (str):', totalWeightStr);
+      console.log('Total Weight (float):', totalWeight);
 
       // Фильтруем ПВЗ по городу
       let filteredPoints = pickupPoints;
       if (city) {
-        filteredPoints = pickupPoints.filter(point => 
-          point.city.toLowerCase().includes(city.toLowerCase())
-        );
+        // ИСПРАВЛЕНО: Проверяем, содержится ли название ПВЗ в строке города (например, "Минск" в "г Минск")
+        const cityNameToMatch = city.toLowerCase();
+        filteredPoints = pickupPoints.filter(point => {
+          const pointCity = point.city.toLowerCase();
+          // Проверяем, является ли точное название города частью строки full_locality_name
+          // или просто точное совпадение
+          return cityNameToMatch.includes(pointCity) || pointCity.includes(cityNameToMatch);
+        });
       }
+
+      console.log('Filtered Points before calculation:', filteredPoints);
 
       // Формируем массив тарифов для InSales v2 API
       const tariffs = filteredPoints.map(point => {
@@ -174,17 +190,17 @@ exports.handler = async (event, context) => {
         body: JSON.stringify(tariffs)
       };
     }
-    
+
     if (path === '/api/pickup-points' && httpMethod === 'POST') {
       const { city } = requestBody;
-      
+
       let filteredPoints = pickupPoints;
       if (city && city.trim()) {
-        filteredPoints = pickupPoints.filter(point => 
+        filteredPoints = pickupPoints.filter(point =>
           point.city.toLowerCase().includes(city.toLowerCase())
         );
       }
-      
+
       return {
         statusCode: 200,
         ...handleCORS(),
@@ -200,13 +216,13 @@ exports.handler = async (event, context) => {
         })
       };
     }
-    
+
     if (path === '/api/pickup-point/calculate' && httpMethod === 'POST') {
       const { order, pickup_point_id } = requestBody;
       const totalWeight = order?.total_weight || 0;
-      
+
       const price = calculatePrice(totalWeight);
-      
+
       return {
         statusCode: 200,
         ...handleCORS(),
@@ -218,7 +234,7 @@ exports.handler = async (event, context) => {
         })
       };
     }
-    
+
     if (path === '/pickup-points' && httpMethod === 'GET') {
       return {
         statusCode: 200,
@@ -235,12 +251,12 @@ exports.handler = async (event, context) => {
         })
       };
     }
-    
+
     // Если маршрут не найден
     return {
       statusCode: 404,
       ...handleCORS(),
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         error: 'Endpoint not found',
         path: path,
         method: httpMethod,
@@ -253,14 +269,14 @@ exports.handler = async (event, context) => {
         ]
       })
     };
-    
+
   } catch (error) {
     console.error('Function error:', error);
-    
+
     return {
       statusCode: 500,
       ...handleCORS(),
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         error: 'Internal Server Error',
         message: error.message
       })
