@@ -831,7 +831,7 @@ exports.handler = async (event, context) => {
           currency: 'BYN',
           
           // Информация о доставке
-          title: `${point.name} ${point.address`,
+          title: `${point.name} ${point.address}`,
           description: `${point.address} (${point.working_hours})`,
           
           // Интервал доставки
