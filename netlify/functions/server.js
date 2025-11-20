@@ -172,7 +172,7 @@ exports.handler = async (event, context) => {
           description: `${point.address} (${point.working_hours})`, // Адрес и часы
           fields_values: [
             {
-      field_id: shipping_address_field_115921129, // Уникальный идентификатор
+      field_id: 115921129, // Уникальный идентификатор
       value: point.address // Значение - адрес
     },
     // --- НОВОЕ: Передаем ID ПВЗ как скрытое поле (для дополнительной информации) ---
