@@ -1,53 +1,67 @@
 // Данные о пунктах выдачи (оставляем как есть)
+// Формируем массив точек самовывоза
 const pickupPoints = [
   {
     id: 1,
-    city: "Минск",
-    name: "ПВЗ Минск",
-    address: "ул. Ленина, 15",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-123-45-67"
+    latitude: 53.9049,
+    longitude: 27.5615,
+    shipping_company_handle: 'autolight_express',
+    title: 'ПВЗ Минск',
+    type: 'locker',
+    address: 'ул. Ленина, 15',
+    description: 'ПВЗ в торговом центре "Минск-Сити"',
+    phones: ['+375-29-123-45-67'],
+    payment_method: ['CASH', 'CARD'],
+    tariffs: [
+      {
+        id: 'pvz_1',
+        price: 5.00,
+        title: 'Доставка до ПВЗ',
+        delivery_interval: {
+          min_days: 1,
+          max_days: 1,
+          description: '1 день'
+        },
+        fields_values: [
+          {
+            handle: 'pickup_point_id',
+            value: '1'
+          }
+        ]
+      }
+    ]
   },
   {
     id: 2,
-    city: "Брест",
-    name: "ПВЗ Брест",
-    address: "ул. Гоголя, 25",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-234-56-78"
+    latitude: 52.0512,
+    longitude: 23.9278,
+    shipping_company_handle: 'autolight_express',
+    title: 'ПВЗ Брест',
+    type: 'locker',
+    address: 'ул. Гоголя, 25',
+    description: 'ПВЗ в торговом центре "Гоголь"',
+    phones: ['+375-29-234-56-78'],
+    payment_method: ['CASH', 'CARD'],
+    tariffs: [
+      {
+        id: 'pvz_2',
+        price: 5.00,
+        title: 'Доставка до ПВЗ',
+        delivery_interval: {
+          min_days: 1,
+          max_days: 1,
+          description: '1 день'
+        },
+        fields_values: [
+          {
+            handle: 'pickup_point_id',
+            value: '2'
+          }
+        ]
+      }
+    ]
   },
-  {
-    id: 3,
-    city: "Витебск",
-    name: "ПВЗ Витебск",
-    address: "ул. Победы, 10",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-345-67-89"
-  },
-  {
-    id: 4,
-    city: "Гомель",
-    name: "ПВЗ Гомель",
-    address: "ул. Советская, 30",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-456-78-90"
-  },
-  {
-    id: 5,
-    city: "Гродно",
-    name: "ПВЗ Гродно",
-    address: "ул. Ожешко, 12",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-567-89-01"
-  },
-  {
-    id: 6,
-    city: "Барановичи",
-    name: "ПВЗ Барановичи",
-    address: "ул. Брестская, 5",
-    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
-    phone: "+375-29-678-90-12"
-  }
+  // Добавьте остальные ПВЗ
 ];
 
 // Расчет стоимости по весу (оставляем как есть)
