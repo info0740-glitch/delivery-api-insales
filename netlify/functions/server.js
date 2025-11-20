@@ -170,9 +170,17 @@ exports.handler = async (event, context) => {
           // ВАЖНО: title и description будут отображаться покупателю
           title: `${point.name}`, // Название ПВЗ
           description: `${point.address} (${point.working_hours})`, // Адрес и часы
+          shipping_address: {
+      // Обязательно передаём адрес ПВЗ в поле shipping_address
+      full_locality_name: `${point.city}, ${point.address}`,
+      address: point.address,
+      city: point.city,
+      country: 'Беларусь',
+      // Дополнительные поля по необходимости
+    },
           fields_values: [
             {
-      field_id: 115921129, // Уникальный идентификатор
+      handle: 'pickup_point_address', // Уникальный идентификатор
       value: point.address // Значение - адрес
     },
     // --- НОВОЕ: Передаем ID ПВЗ как скрытое поле (для дополнительной информации) ---
@@ -180,6 +188,7 @@ exports.handler = async (event, context) => {
       handle: 'pickup_point_id',
       value: point.id.toString()
     }
+
     // ---
             // Сохраняем ID ПВЗ как доп. поле заказа (если нужно)
             // { field_id: 12345, value: point.id.toString() }, // ЗАМЕНИТЕ 12345 НА РЕАЛЬНЫЙ ID ПОЛЯ В INSALES
