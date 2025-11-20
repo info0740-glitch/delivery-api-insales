@@ -7,6 +7,35 @@ if (typeof window === 'undefined' || typeof document === 'undefined') {
   throw new Error('This script is intended for browser environment only.');
 }
 
+// --- ОБЯЗАТЕЛЬНО: Проверяем и определяляем triggerCustom СРАЗУ ---
+if (typeof $ !== 'undefined') {
+  if (typeof $.fn.triggerCustom !== 'function') {
+    console.log('🔧 Определяем $.fn.triggerCustom');
+    $.fn['triggerCustom'] = function(type, data, options) {
+      if (options == null) {
+        options = {};
+      }
+      options = $.extend({}, {
+        bubbles: true,
+        cancelable: true,
+        detail: data
+      }, {
+        bubbles: options.bubbles,
+        cancelable: options.cancelable
+      });
+      return this.each(function() {
+        var e;
+        e = new window.CustomEvent(type, options);
+        return this.dispatchEvent(e);
+      });
+    };
+  } else {
+    console.log('✅ $.fn.triggerCustom уже определен InSales');
+  }
+} else {
+  console.error('❌ jQuery не найден. triggerCustom не будет определен.');
+}
+
 const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
 
 // --- Функции работы с вашим API (только браузерные) ---
@@ -153,28 +182,6 @@ function stylePickupContainer(container) {
   `;
   document.head.appendChild(style);
   container.classList.add('pickup-points-styled');
-}
-
-// --- ВАЖНО: Добавляем jQuery метод triggerCustom, если его нет ---
-if (typeof $ !== 'undefined' && typeof $.fn.triggerCustom !== 'function') {
-  $.fn['triggerCustom'] = function(type, data, options) {
-    if (options == null) {
-      options = {};
-    }
-    options = $.extend({}, {
-      bubbles: true,
-      cancelable: true,
-      detail: data
-    }, {
-      bubbles: options.bubbles,
-      cancelable: options.cancelable
-    });
-    return this.each(function() {
-      var e;
-      e = new window.CustomEvent(type, options);
-      return this.dispatchEvent(e);
-    });
-  }
 }
 
 // --- Основная логика ---
