@@ -1,411 +1,352 @@
-// delivery.js - для внешнего способа доставки "тест" (ID 14999345)
-// Используем InSales JavaScript API v1
-// Проверка, что код выполняется в браузере
-if (typeof window === 'undefined' || typeof document === 'undefined') {
-  console.error('❌ delivery.js должен выполняться в браузере!');
-  throw new Error('This script is intended for browser environment only.');
+// Данные о пунктах выдачи (оставляем как есть)
+const pickupPoints = [
+  {
+    id: 1,
+    city: "Минск",
+    name: "ПВЗ Минск",
+    address: "ул. Ленина, 15",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-123-45-67"
+  },
+  {
+    id: 2,
+    city: "Брест",
+    name: "ПВЗ Брест",
+    address: "ул. Гоголя, 25",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-234-56-78"
+  },
+  {
+    id: 3,
+    city: "Витебск",
+    name: "ПВЗ Витебск",
+    address: "ул. Победы, 10",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-345-67-89"
+  },
+  {
+    id: 4,
+    city: "Гомель",
+    name: "ПВЗ Гомель",
+    address: "ул. Советская, 30",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-456-78-90"
+  },
+  {
+    id: 5,
+    city: "Гродно",
+    name: "ПВЗ Гродно",
+    address: "ул. Ожешко, 12",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-567-89-01"
+  },
+  {
+    id: 6,
+    city: "Барановичи",
+    name: "ПВЗ Барановичи",
+    address: "ул. Брестская, 5",
+    working_hours: "Пн-Пт: 9:00-18:00, Сб: 10:00-16:00",
+    phone: "+375-29-678-90-12"
+  }
+];
+
+// Расчет стоимости по весу (оставляем как есть)
+function calculatePrice(weight) {
+  if (weight <= 1) return 5.00;
+  if (weight <= 3) return 7.00;
+  if (weight <= 5) return 10.00;
+  if (weight <= 10) return 15.00;
+  if (weight <= 20) return 25.00;
+  return 40.00;
 }
 
-const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
-
-// --- Функции работы с вашим API (только браузерные) ---
-
-// Получение пунктов выдачи по городу
-function getPickupPoints(city) {
-  console.log('🔍 Запрашиваем ПВЗ для города:', city);
-  const requestBody = {
-    city: city || ''
-  };
-
-  return fetch(API_BASE_URL + '/api/pickup-points', {
-    method: 'POST',
+// Функция для обработки CORS preflight (оставляем как есть)
+function handleCORS() {
+  return {
     headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
-  })
-  .then(response => response.json())
-  .then(data => {
-    console.log('✅ Получили ПВЗ:', data.pickup_points);
-    return data.pickup_points;
-  });
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Content-Type': 'application/json' // Заголовок по умолчанию для JSON
+    }
+  };
 }
 
-// Расчет стоимости доставки до выбранного ПВЗ
-function calculatePickupDelivery(orderWeight, pickupPointId) {
-  console.log('🔍 Рассчитываем стоимость для ПВЗ ID:', pickupPointId, 'Вес:', orderWeight);
-  const requestBody = {
-    order: {
-      total_weight: orderWeight || 0
-    },
-    pickup_point_id: pickupPointId
-  };
+// --- НОВАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ JSONP ОТВЕТА ---
+function createJSONPResponse(data, callbackName) {
+  // Проверяем, является ли callbackName безопасным идентификатором JavaScript
+  if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(callbackName)) {
+    throw new Error('Invalid callback name');
+  }
+  // Возвращаем строку в формате callbackName({...});
+  return `${callbackName}(${JSON.stringify(data)});`;
+}
 
-  return fetch(API_BASE_URL + '/api/pickup-point/calculate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
-  })
-  .then(response => response.json())
-  .then(data => {
-    console.log('✅ Рассчитали стоимость:', data);
+// Основной обработчик Netlify Function
+exports.handler = async (event, context) => {
+  // Обработка CORS preflight запросов
+  if (event.httpMethod === 'OPTIONS') {
     return {
-      price: data.price,
-      currency: data.currency,
-      delivery_days: data.delivery_days,
-      description: data.description
+      statusCode: 200,
+      ...handleCORS(),
+      body: ''
     };
-  });
-}
-
-// --- Функции для отображения ПВЗ и стилей (только браузерные) ---
-
-// Стилизация контейнера пунктов выдачи
-function stylePickupContainer(container) {
-  const style = document.createElement('style');
-  style.textContent = `
-    .pickup-point {
-      border: 2px solid #ddd;
-      border-radius: 8px;
-      padding: 15px;
-      margin: 10px 0;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      background: white;
-    }
-    
-    .pickup-point:hover {
-      border-color: #007bff;
-      box-shadow: 0 2px 8px rgba(0,123,255,0.15);
-    }
-    
-    .pickup-point.selected {
-      border-color: #28a745;
-      background: #f8fff9;
-    }
-    
-    .pickup-point-title {
-      margin: 0 0 10px 0;
-      color: #333;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    
-    .pickup-point-details p {
-      margin: 5px 0;
-      color: #666;
-      font-size: 14px;
-    }
-    
-    .pickup-point-price {
-      margin-top: 10px;
-      padding: 8px;
-      background: #f8f9fa;
-      border-radius: 4px;
-      text-align: center;
-      font-weight: bold;
-      color: #495057;
-    }
-    
-    .final-price {
-      background: #28a745 !important;
-      color: white !important;
-    }
-    
-    .price-loading, .pickup-loading {
-      color: #007bff;
-      font-style: italic;
-    }
-    
-    .price-error, .pickup-error {
-      color: #dc3545;
-      background: #f8d7da;
-      padding: 8px;
-      border-radius: 4px;
-    }
-    
-    .pickup-empty, .pickup-hint {
-      text-align: center;
-      color: #6c757d;
-      padding: 20px;
-      font-style: italic;
-    }
-    
-    .delivery-info {
-      background: #e7f3ff;
-      border: 1px solid #b3d7ff;
-      border-radius: 4px;
-      padding: 15px;
-      margin: 10px 0;
-    }
-    
-    .delivery-info h4 {
-      margin: 0 0 10px 0;
-      color: #004085;
-    }
-    
-    .delivery-info p {
-      margin: 5px 0;
-    }
-  `;
-  document.head.appendChild(style);
-  container.classList.add('pickup-points-styled');
-}
-
-// --- ВАЖНО: Добавляем jQuery метод triggerCustom, если его нет ---
-if (typeof $ !== 'undefined' && typeof $.fn.triggerCustom !== 'function') {
-  $.fn['triggerCustom'] = function(type, data, options) {
-    if (options == null) {
-      options = {};
-    }
-    options = $.extend({}, {
-      bubbles: true,
-      cancelable: true,
-      detail: data
-    }, {
-      bubbles: options.bubbles,
-      cancelable: options.cancelable
-    });
-    return this.each(function() {
-      var e;
-      e = new window.CustomEvent(type, options);
-      return this.dispatchEvent(e);
-    });
   }
-}
-
-// --- Основная логика ---
-$(document).ready(function() {
-  console.log('🚀 delivery.js загружен для способа доставки "тест"');
-
-  // Ждем инициализации способов доставки InSales
-  $(document).on('inited:insales:checkout:deliveries', function(e) {
-    console.log('✅ InSales: Способы доставки инициализированы');
-    console.log('Данные:', e.originalEvent.detail);
-
-    // Сообщаем InSales, что мы готовы
-    $(document).triggerCustom('ready:insales:delivery');
-    console.log('📤 InSales: Сообщили, что готовы обрабатывать события');
-
-    // Начинаем отслеживание событий для нашего способа доставки
-    const $deliveryElement = $('#order_delivery_variant_id_14999345');
-
-    if ($deliveryElement.length) {
-      console.log('🔍 Начинаем отслеживание для способа доставки ID 14999345');
-
-      // Событие: способ доставки выбран пользователем
-      $deliveryElement.on('selected:insales:checkout:delivery', function(e) {
-        const orderData = e.originalEvent.detail;
-        console.log('✅ InSales: Способ доставки "тест" выбран');
-        console.log('Данные заказа:', orderData);
-
-        // Показываем интерфейс выбора ПВЗ
-        showPickupPointsInterface(orderData);
-      });
-
-      // Событие: способ доставки снят (выбран другой)
-      $deliveryElement.on('unselected:insales:checkout:delivery', function(e) {
-        const orderData = e.originalEvent.detail;
-        console.log('❌ InSales: Способ доставки "тест" снят');
-        // Закрываем интерфейс ПВЗ, если открыт
-        hidePickupPointsInterface();
-      });
-
-    } else {
-      console.warn('⚠️ Элемент способа доставки ID 14999345 не найден.');
-    }
-  });
-});
-
-// --- Функция для отображения интерфейса выбора ПВЗ ---
-function showPickupPointsInterface(orderData) {
-  console.log('🔍 showPickupPointsInterface вызвана');
-  // Получаем город из данных заказа
-  const city = orderData.order.shipping_address?.full_locality_name || '';
-  console.log('📍 Город из данных InSales:', city);
-
-  if (!city || city.length < 2) {
-    console.warn('⚠️ Город не указан или слишком короткий.');
-    // Показать сообщение пользователю
-    $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Введите город для выбора пункта выдачи.');
-    return;
-  }
-
-  // Показываем спиннер "расчет" для способа доставки
-  $('#order_delivery_variant_id_14999345').triggerCustom('calculating:insales:delivery');
-
-  // Загружаем ПВЗ
-  getPickupPoints(city)
-    .then(points => {
-      console.log('✅ Получили ПВЗ:', points);
-      if (points && points.length > 0) {
-        // Открываем модальное окно
-        const $modal = $('.co-modal--outlet');
-        const $modalBody = $('.js-modal-body');
-        if ($modal.length && $modalBody.length) {
-          $modal.removeClass('co-modal--hide');
-          displayPickupPointsForSelection($modalBody, points, orderData);
-        } else {
-          console.error('❌ Модальное окно или контейнер для ПВЗ не найден.');
-          $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Ошибка: интерфейс выбора недоступен.');
-        }
-      } else {
-        console.log('📭 ПВЗ в городе не найдены.');
-        $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Пункты выдачи в данном городе не найдены.');
+  
+  try {
+    const { httpMethod, path, body, queryStringParameters } = event;
+    
+    // Парсим JSON body если он есть (для POST)
+    let requestBody = {};
+    if (body && body.trim()) {
+      try {
+        requestBody = JSON.parse(body);
+      } catch (e) {
+        console.log('Error parsing JSON:', e);
+        requestBody = {};
       }
-    })
-    .catch(error => {
-      console.error('❌ Ошибка загрузки ПВЗ:', error);
-      $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Ошибка загрузки пунктов выдачи.');
-    });
-}
-
-// --- Функция для отображения ПВЗ в интерфейсе ---
-function displayPickupPointsForSelection($container, points, orderData) {
-  // Очищаем контейнер
-  $container.empty();
-
-  // Создаем HTML для ПВЗ
-  const pointsHTML = points.map((point, index) => `
-    <div class="pickup-point" data-id="${point.id}" data-index="${index}">
-      <div class="pickup-point-header">
-        <h4 class="pickup-point-title">${point.title}</h4>
-      </div>
-      <div class="pickup-point-details">
-        <p class="pickup-point-address"><strong>Адрес:</strong> ${point.address}</p>
-        <p class="pickup-point-hours"><strong>Режим работы:</strong> ${point.working_hours}</p>
-        <p class="pickup-point-phone"><strong>Телефон:</strong> ${point.phone}</p>
-      </div>
-      <div class="pickup-point-price" id="price-${point.id}">
-        Выберите для расчета стоимости
-      </div>
-    </div>
-  `).join('');
-
-  $container.html(pointsHTML);
-
-  // Стилизуем
-  if (!$container.hasClass('pickup-points-styled')) {
-    stylePickupContainer($container[0]); // Передаем DOM-элемент
-  }
-
-  // Добавляем обработчики клика
-  $container.find('.pickup-point').on('click', function() {
-    handlePickupPointSelection($(this), orderData);
-  });
-}
-
-// --- Функция для обработки выбора ПВЗ ---
-function handlePickupPointSelection($selectedPoint, orderData) {
-  const pointId = $selectedPoint.data('id');
-  const pointTitle = $selectedPoint.find('.pickup-point-title').text();
-
-  console.log('✅ Выбран ПВЗ ID:', pointId, 'Название:', pointTitle);
-
-  // Получаем вес заказа из orderData
-  let orderWeight = orderData.order.total_weight || 0;
-  if (typeof orderWeight === 'string') {
-      orderWeight = parseFloat(orderWeight) || 0;
-  }
-  console.log('📦 Вес заказа из orderData:', orderWeight);
-
-  // Если вес не нашли в orderData, пробуем получить из DOM (например, из скрытого поля)
-  // ВАЖНО: Вес должен быть доступен. Если его нет в orderData, нужно найти способ его получить.
-  // Пример: const items = orderData.order.order_lines; let totalWeight = items.reduce((sum, item) => sum + (parseFloat(item.weight) || 0), 0);
-  if (orderWeight <= 0) {
-    // Попробуем найти в DOM как временное решение
-    const itemsPriceElement = $('#order_items_price'); // Иногда вес хранится рядом
-    // Или ищем скрытое поле с весом, если InSales его добавляет
-    // const weightElement = document.querySelector('[data-weight]');
-    // if (weightElement) { orderWeight = parseFloat(weightElement.textContent) || 0; }
-    // Пока используем фиксированное значение для теста, если не найдено
-    console.warn('⚠️ Вес заказа не найден в orderData, используем 1.0 для теста.');
-    orderWeight = 1.0; // ЗАМЕНИТЕ ЭТО НА РЕАЛЬНОЕ ПОЛУЧЕНИЕ ВЕСА ИЗ orderData.order.order_lines или DOM
-  }
-
-  if (orderWeight <= 0) {
-    alert('Не удалось определить вес заказа для расчета стоимости доставки.');
-    return;
-  }
-
-  // Показываем индикатор расчета на выбранном ПВЗ
-  const $priceElement = $selectedPoint.find('.pickup-point-price');
-  $priceElement.html('<div class="price-loading">Расчет стоимости...</div>');
-
-  // Снимаем выделение с других ПВЗ
-  $('.pickup-point').not($selectedPoint).each(function() {
-    const $otherPriceEl = $(this).find('.pickup-point-price');
-    if (!$otherPriceEl.hasClass('final-price')) {
-      $otherPriceEl.text('Выберите для расчета стоимости');
     }
-    $(this).removeClass('selected');
-  });
 
-  // Выделяем выбранный ПВЗ
-  $selectedPoint.addClass('selected');
+    // --- ОБНОВЛЁННАЯ ОБРАБОТКА GET-запроса для /api/delivery/calculate (для InSales v1 API) ---
+    if (path === '/api/delivery/calculate' && httpMethod === 'GET') {
+      console.log('Handling GET /api/delivery/calculate from InSales v1 API');
+      console.log('Query parameters:', queryStringParameters);
 
-  // Рассчитываем стоимость
-  calculatePickupDelivery(orderWeight, pointId)
-    .then(result => {
-      console.log('✅ Рассчитанная стоимость:', result);
-
-      // Обновляем цену на ПВЗ
-      $priceElement.html(`
-        <div class="final-price">
-          <span class="price-value">${result.price} ${result.currency}</span>
-          <div class="price-details">
-            <small>${result.description}</small>
-            <small>Срок доставки: ${result.delivery_days} ${result.delivery_days === 1 ? 'день' : 'дня'}</small>
-          </div>
-        </div>
-      `);
-      $priceElement.addClass('final-price');
-
-      // --- КЛЮЧЕВОЙ ШАГ: Обновляем способ доставки в InSales ---
-      const deliveryDataForUpdate = {
-        price: result.price,
-        // description: result.description, // Можно добавить описание
-        fields_values: [
-          // Сохраняем ID и название выбранного ПВЗ как доп. поле (если нужно)
-          // ЗАМЕНИТЕ 12345 И 12346 НА РЕАЛЬНЫЕ ID ДОПОЛНИТЕЛЬНЫХ ПОЛЕЙ В INSALES, если они есть
-          // { field_id: 12345, value: pointId.toString() },
-          // { field_id: 12346, value: pointTitle }
-        ],
-        is_external: true, // Указываем, что это внешний способ
-        // external_data: { selected_pickup_point_id: pointId } // Произвольные данные (не сохраняются в заказ)
+      // Подготавливаем ответ для InSales v1 API
+      const response = {
+        price: 0, // или базовая стоимость
+        delivery_days: 1,
+        description: "Доставка до пункта выдачи (выбор при оформлении)"
       };
 
-      // Вызываем update:insales:delivery
-      $('#order_delivery_variant_id_14999345').triggerCustom('update:insales:delivery', deliveryDataForUpdate);
-      console.log('🔄 InSales: Обновлена стоимость доставки до', result.price);
+      // Проверяем наличие параметра callback (JSONP)
+      const callbackName = queryStringParameters?.callback;
 
-      // Закрываем модальное окно (опционально)
-      // $('.co-modal--outlet').addClass('co-modal--hide');
+      if (callbackName) {
+        console.log('Sending JSONP response');
+        try {
+          // Создаем JSONP-ответ
+          const jsonpBody = createJSONPResponse(response, callbackName);
+          // Возвращаем с правильным Content-Type для JSONP
+          return {
+            statusCode: 200,
+            headers: {
+              'Content-Type': 'application/javascript', // ВАЖНО: application/javascript для JSONP
+              // CORS заголовки для JSONP не обязательны, но можно оставить для безопасности
+              'Access-Control-Allow-Origin': '*',
+            },
+            body: jsonpBody // Тело должно быть строкой
+          };
+        } catch (jsonpError) {
+          console.error('Error creating JSONP response:', jsonpError.message);
+          // Возвращаем ошибку в формате JSON, так как callback может быть неверным
+          return {
+            statusCode: 400, // Bad Request
+            headers: {
+              'Content-Type': 'application/json', // JSON для ошибки
+              'Access-Control-Allow-Origin': '*',
+            },
+            body: JSON.stringify({ error: 'Invalid callback name' })
+          };
+        }
+      } else {
+        // Если callback нет, возвращаем обычный JSON (для других целей, если нужно)
+        console.log('Sending JSON response (no callback)');
+        return {
+          statusCode: 200,
+          ...handleCORS(), // Используем функцию handleCORS, но переопределяем Content-Type если нужно
+          headers: {
+            ...handleCORS().headers, // Берем стандартные CORS заголовки
+            'Content-Type': 'application/json', // Убедимся, что Content-Type JSON
+          },
+          body: JSON.stringify(response)
+        };
+      }
+    }
+    
+    // --- ОБНОВЛЁННАЯ ОБРАБОТКА POST-запроса для /api/delivery/calculate ---
+    if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
+      const { order, shipping_address } = requestBody;
+      const totalWeight = order?.total_weight || 0;
+      
+      const price = calculatePrice(totalWeight);
+      const deliveryDays = totalWeight <= 5 ? 1 : 2;
+      
+      const response = {
+        price: price,
+        currency: 'BYN',
+        delivery_days: deliveryDays,
+        description: `Доставка курьером (${totalWeight} кг)`
+      };
 
-    })
-    .catch(error => {
-      console.error('❌ Ошибка расчета стоимости:', error);
-      $priceElement.html('<div class="price-error">Ошибка расчета стоимости</div>');
-      // Сбрасываем спиннер, если была ошибка
-      // Важно: не сбрасываем цену на 0, если она уже была установлена ранее
-      // $('#order_delivery_variant_id_14999345').triggerCustom('update:insales:delivery', { price: 0, fields_values: [] });
-    });
-}
-
-// --- Функция для скрытия интерфейса ПВЗ ---
-function hidePickupPointsInterface() {
-  console.log('🔍 hidePickupPointsInterface вызвана');
-  // Закрываем модальное окно
-  $('.co-modal--outlet').addClass('co-modal--hide');
-  // Очищаем контейнер
-  $('.js-modal-body').empty();
-  // Сбрасываем стили
-  $('.js-modal-body').removeClass('pickup-points-styled');
-  // Убираем обработчики клика
-  $('.pickup-point').off('click');
-}
-
-// --- Отладка ---
-console.log('🔧 Для отладки используйте: getPickupPoints(), calculatePickupDelivery()');
+      // Проверяем callback и для POST (маловероятно для InSales v1, но на всякий случай)
+      const callbackName = requestBody?.callback || queryStringParameters?.callback;
+      if (callbackName) {
+          console.log('Sending JSONP response from POST handler');
+          try {
+            const jsonpBody = createJSONPResponse(response, callbackName);
+            return {
+              statusCode: 200,
+              headers: {
+                  'Content-Type': 'application/javascript',
+                  'Access-Control-Allow-Origin': '*',
+              },
+              body: jsonpBody
+            };
+        } catch (jsonpError) {
+            console.error('Error creating JSONP response:', jsonpError.message);
+            return {
+              statusCode: 400,
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Access-Control-Allow-Origin': '*',
+              },
+              body: JSON.stringify({ error: 'Invalid callback name' })
+            };
+        }
+      } else {
+          // Возвращаем обычный JSON для POST
+          return {
+            statusCode: 200,
+            ...handleCORS(),
+            headers: {
+              ...handleCORS().headers,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(response)
+          };
+      }
+    }
+    
+    // --- Остальные обработчики остаются без изменений ---
+    
+    if (path === '/health' && httpMethod === 'GET') {
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        headers: {
+            ...handleCORS().headers,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: 'OK', 
+          message: 'Автолайт Экспресс API работает!',
+          timestamp: new Date().toISOString(),
+          environment: 'netlify'
+        })
+      };
+    }
+    
+    if (path === '/api/pickup-points' && httpMethod === 'POST') {
+      const { city } = requestBody;
+      
+      let filteredPoints = pickupPoints;
+      if (city && city.trim()) {
+        filteredPoints = pickupPoints.filter(point => 
+          point.city.toLowerCase().includes(city.toLowerCase())
+        );
+      }
+      
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        headers: {
+            ...handleCORS().headers,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pickup_points: filteredPoints.map(point => ({
+            id: point.id,
+            title: point.name,
+            address: point.address,
+            working_hours: point.working_hours,
+            phone: point.phone,
+            city: point.city
+          }))
+        })
+      };
+    }
+    
+    if (path === '/api/pickup-point/calculate' && httpMethod === 'POST') {
+      const { order, pickup_point_id } = requestBody;
+      const totalWeight = order?.total_weight || 0;
+      
+      const price = calculatePrice(totalWeight);
+      
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        headers: {
+            ...handleCORS().headers,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          price: price,
+          currency: 'BYN',
+          delivery_days: 1,
+          description: `Доставка до пункта выдачи (${totalWeight} кг)`
+        })
+      };
+    }
+    
+    if (path === '/pickup-points' && httpMethod === 'GET') {
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        headers: {
+            ...handleCORS().headers,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pickup_points: pickupPoints.map(point => ({
+            id: point.id,
+            title: point.name,
+            address: point.address,
+            working_hours: point.working_hours,
+            phone: point.phone,
+            city: point.city
+          }))
+        })
+      };
+    }
+    
+    // Если маршрут не найден
+    return {
+      statusCode: 404,
+      ...handleCORS(),
+      headers: {
+          ...handleCORS().headers,
+          'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        error: 'Endpoint not found',
+        path: path,
+        method: httpMethod,
+        available_endpoints: [
+          'GET /health',
+          'GET /api/delivery/calculate (supports JSONP)',
+          'POST /api/delivery/calculate (supports JSONP)',
+          'POST /api/pickup-points',
+          'POST /api/pickup-point/calculate',
+          'GET /pickup-points'
+        ]
+      })
+    };
+    
+  } catch (error) {
+    console.error('Function error:', error);
+    
+    return {
+      statusCode: 500,
+      ...handleCORS(),
+      headers: {
+          ...handleCORS().headers,
+          'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        error: 'Internal Server Error',
+        message: error.message
+      })
+    };
+  }
+};
