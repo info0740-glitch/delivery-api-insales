@@ -84,9 +84,9 @@ exports.handler = async (event, context) => {
   }
   
   try {
-    const { httpMethod, path, body } = event;
+    const { httpMethod, path, body, queryStringParameters } = event;
     
-    // Парсим JSON body если он есть
+    // Парсим JSON body если он есть (для POST)
     let requestBody = {};
     if (body && body.trim()) {
       try {
@@ -96,21 +96,30 @@ exports.handler = async (event, context) => {
         requestBody = {};
       }
     }
-    
-    // Обработка маршрутов
-    if (path === '/health' && httpMethod === 'GET') {
+
+    // Обработка GET-запроса для /api/delivery/calculate (для InSales v1 API)
+    if (path === '/api/delivery/calculate' && httpMethod === 'GET') {
+      console.log('Handling GET /api/delivery/calculate from InSales v1 API');
+      console.log('Query parameters:', queryStringParameters);
+
+      // Для InSales v1 API часто возвращают базовую стоимость или 0,
+      // чтобы снять статус "загрузка". Точная стоимость рассчитывается позже в браузере.
+      // Параметры из GET-запроса (queryStringParameters) можно использовать для предварительного расчета,
+      // но для простоты возвращаем 0.
+      const response = {
+        price: 0, // или базовая стоимость, например calculatePrice(parseFloat(queryStringParameters.weight || 0))
+        delivery_days: 1,
+        description: "Доставка до пункта выдачи (выбор при оформлении)"
+      };
+
       return {
         statusCode: 200,
         ...handleCORS(),
-        body: JSON.stringify({
-          status: 'OK', 
-          message: 'Автолайт Экспресс API работает!',
-          timestamp: new Date().toISOString(),
-          environment: 'netlify'
-        })
+        body: JSON.stringify(response)
       };
     }
     
+    // Обработка POST-запроса для /api/delivery/calculate (ваш исходный код)
     if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
       const { order, shipping_address } = requestBody;
       const totalWeight = order?.total_weight || 0;
@@ -126,6 +135,20 @@ exports.handler = async (event, context) => {
           currency: 'BYN',
           delivery_days: deliveryDays,
           description: `Доставка курьером (${totalWeight} кг)`
+        })
+      };
+    }
+    
+    // Обработка маршрутов
+    if (path === '/health' && httpMethod === 'GET') {
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify({
+          status: 'OK', 
+          message: 'Автолайт Экспресс API работает!',
+          timestamp: new Date().toISOString(),
+          environment: 'netlify'
         })
       };
     }
@@ -201,6 +224,7 @@ exports.handler = async (event, context) => {
         method: httpMethod,
         available_endpoints: [
           'GET /health',
+          'GET /api/delivery/calculate',
           'POST /api/delivery/calculate',
           'POST /api/pickup-points',
           'POST /api/pickup-point/calculate',
