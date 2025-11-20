@@ -270,6 +270,14 @@ function findCityField() {
 }
 
 function findPickupContainer() {
+  // Ищем контейнер внутри модального окна
+  const modalBody = document.querySelector('.js-modal-body');
+  if (modalBody) {
+    console.log('✅ Найден контейнер внутри модального окна');
+    return modalBody;
+  }
+
+  // Если модальное окно не найдено, ищем по классам
   const selectors = [
     '.pickup-points',
     '.delivery-pickup',
@@ -278,11 +286,16 @@ function findPickupContainer() {
     '[data-pickup-points]',
     '#pickup-points'
   ];
-  
+
   for (const selector of selectors) {
     const container = document.querySelector(selector);
-    if (container) return container;
+    if (container) {
+      console.log('✅ Найден контейнер:', selector);
+      return container;
+    }
   }
+
+  console.warn('❌ Контейнер для пунктов выдачи не найден');
   return null;
 }
 
