@@ -60,26 +60,16 @@ function calculatePrice(weight) {
   return 40.00;
 }
 
-// Функция для обработки CORS preflight (оставляем как есть)
+// Функция для обработки CORS preflight
 function handleCORS() {
   return {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Content-Type': 'application/json' // Заголовок по умолчанию для JSON
+      'Content-Type': 'application/json'
     }
   };
-}
-
-// --- НОВАЯ ФУНКЦИЯ ДЛЯ СОЗДАНИЯ JSONP ОТВЕТА ---
-function createJSONPResponse(data, callbackName) {
-  // Проверяем, является ли callbackName безопасным идентификатором JavaScript
-  if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(callbackName)) {
-    throw new Error('Invalid callback name');
-  }
-  // Возвращаем строку в формате callbackName({...});
-  return `${callbackName}(${JSON.stringify(data)});`;
 }
 
 // Основной обработчик Netlify Function
@@ -94,146 +84,94 @@ exports.handler = async (event, context) => {
   }
   
   try {
-    const { httpMethod, path, body, queryStringParameters } = event;
+    const { httpMethod, path, body } = event;
     
-    // Парсим JSON body если он есть (для POST)
+    // Парсим JSON body если он есть (только для POST)
     let requestBody = {};
     if (body && body.trim()) {
       try {
         requestBody = JSON.parse(body);
       } catch (e) {
         console.log('Error parsing JSON:', e);
-        requestBody = {};
-      }
-    }
-
-    // --- ОБНОВЛЁННАЯ ОБРАБОТКА GET-запроса для /api/delivery/calculate (для InSales v1 API) ---
-    if (path === '/api/delivery/calculate' && httpMethod === 'GET') {
-      console.log('Handling GET /api/delivery/calculate from InSales v1 API');
-      console.log('Query parameters:', queryStringParameters);
-
-      // Подготавливаем ответ для InSales v1 API
-      const response = {
-        price: 0, // или базовая стоимость
-        delivery_days: 1,
-        description: "Доставка до пункта выдачи (выбор при оформлении)"
-      };
-
-      // Проверяем наличие параметра callback (JSONP)
-      const callbackName = queryStringParameters?.callback;
-
-      if (callbackName) {
-        console.log('Sending JSONP response');
-        try {
-          // Создаем JSONP-ответ
-          const jsonpBody = createJSONPResponse(response, callbackName);
-          // Возвращаем с правильным Content-Type для JSONP
-          return {
-            statusCode: 200,
-            headers: {
-              'Content-Type': 'application/javascript', // ВАЖНО: application/javascript для JSONP
-              // CORS заголовки для JSONP не обязательны, но можно оставить для безопасности
-              'Access-Control-Allow-Origin': '*',
-            },
-            body: jsonpBody // Тело должно быть строкой
-          };
-        } catch (jsonpError) {
-          console.error('Error creating JSONP response:', jsonpError.message);
-          // Возвращаем ошибку в формате JSON, так как callback может быть неверным
-          return {
-            statusCode: 400, // Bad Request
-            headers: {
-              'Content-Type': 'application/json', // JSON для ошибки
-              'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({ error: 'Invalid callback name' })
-          };
-        }
-      } else {
-        // Если callback нет, возвращаем обычный JSON (для других целей, если нужно)
-        console.log('Sending JSON response (no callback)');
         return {
-          statusCode: 200,
-          ...handleCORS(), // Используем функцию handleCORS, но переопределяем Content-Type если нужно
-          headers: {
-            ...handleCORS().headers, // Берем стандартные CORS заголовки
-            'Content-Type': 'application/json', // Убедимся, что Content-Type JSON
-          },
-          body: JSON.stringify(response)
+          statusCode: 400,
+          ...handleCORS(),
+          body: JSON.stringify({ error: 'Invalid JSON' })
         };
       }
     }
-    
-    // --- ОБНОВЛЁННАЯ ОБРАБОТКА POST-запроса для /api/delivery/calculate ---
-    if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
-      const { order, shipping_address } = requestBody;
-      const totalWeight = order?.total_weight || 0;
-      
-      const price = calculatePrice(totalWeight);
-      const deliveryDays = totalWeight <= 5 ? 1 : 2;
-      
-      const response = {
-        price: price,
-        currency: 'BYN',
-        delivery_days: deliveryDays,
-        description: `Доставка курьером (${totalWeight} кг)`
-      };
 
-      // Проверяем callback и для POST (маловероятно для InSales v1, но на всякий случай)
-      const callbackName = requestBody?.callback || queryStringParameters?.callback;
-      if (callbackName) {
-          console.log('Sending JSONP response from POST handler');
-          try {
-            const jsonpBody = createJSONPResponse(response, callbackName);
-            return {
-              statusCode: 200,
-              headers: {
-                  'Content-Type': 'application/javascript',
-                  'Access-Control-Allow-Origin': '*',
-              },
-              body: jsonpBody
-            };
-        } catch (jsonpError) {
-            console.error('Error creating JSONP response:', jsonpError.message);
-            return {
-              statusCode: 400,
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Access-Control-Allow-Origin': '*',
-              },
-              body: JSON.stringify({ error: 'Invalid callback name' })
-            };
-        }
-      } else {
-          // Возвращаем обычный JSON для POST
-          return {
-            statusCode: 200,
-            ...handleCORS(),
-            headers: {
-              ...handleCORS().headers,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(response)
-          };
-      }
-    }
-    
-    // --- Остальные обработчики остаются без изменений ---
-    
+    // Обработка маршрутов
     if (path === '/health' && httpMethod === 'GET') {
       return {
         statusCode: 200,
         ...handleCORS(),
-        headers: {
-            ...handleCORS().headers,
-            'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           status: 'OK', 
           message: 'Автолайт Экспресс API работает!',
           timestamp: new Date().toISOString(),
           environment: 'netlify'
         })
+      };
+    }
+    
+    // --- ОБНОВЛЕНИЕ: Обработка POST /api/delivery/calculate для v2 API ---
+    if (path === '/api/delivery/calculate' && httpMethod === 'POST') {
+      console.log('Handling POST /api/delivery/calculate for v2 API');
+      console.log('Request Body:', requestBody);
+
+      // Извлекаем информацию из запроса от InSales
+      const order = requestBody.order;
+      const city = order.shipping_address?.full_locality_name || order.shipping_address?.location?.city || '';
+      const totalWeight = parseFloat(order.total_weight) || 0; // Проверяем тип и конвертируем
+
+      console.log('City:', city);
+      console.log('Total Weight:', totalWeight);
+
+      // Фильтруем ПВЗ по городу
+      let filteredPoints = pickupPoints;
+      if (city) {
+        filteredPoints = pickupPoints.filter(point => 
+          point.city.toLowerCase().includes(city.toLowerCase())
+        );
+      }
+
+      // Формируем массив тарифов для InSales v2 API
+      const tariffs = filteredPoints.map(point => {
+        const price = calculatePrice(totalWeight); // Рассчитываем стоимость для каждого ПВЗ
+
+        return {
+          price: price,
+          currency: 'BYN', // Валюта (опционально, InSales может использовать свою)
+          delivery_interval: {
+            min_days: 1,
+            max_days: 1,
+            description: `1 день`
+          },
+          // ВАЖНО: tariff_id должен быть уникальным для каждого тарифа
+          tariff_id: `pvz_${point.id}`, // Пример формирования ID
+          shipping_company_handle: 'autolight_express', // Идентификатор вашей компании
+          // ВАЖНО: title и description будут отображаться покупателю
+          title: `${point.name}`, // Название ПВЗ
+          description: `${point.address} (${point.working_hours})`, // Адрес и часы
+          fields_values: [
+            // Сохраняем ID ПВЗ как доп. поле заказа (если нужно)
+            // { field_id: 12345, value: point.id.toString() }, // ЗАМЕНИТЕ 12345 НА РЕАЛЬНЫЙ ID ПОЛЯ В INSALES
+            // Сохраняем название ПВЗ как доп. поле заказа (если нужно)
+            // { field_id: 12346, value: point.name }, // ЗАМЕНИТЕ 12346 НА РЕАЛЬНЫЙ ID ПОЛЯ В INSALES
+          ],
+          errors: [],
+          warnings: []
+        };
+      });
+
+      console.log('Generated tariffs:', tariffs);
+
+      // Возвращаем массив тарифов
+      return {
+        statusCode: 200,
+        ...handleCORS(),
+        body: JSON.stringify(tariffs)
       };
     }
     
@@ -250,10 +188,6 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 200,
         ...handleCORS(),
-        headers: {
-            ...handleCORS().headers,
-            'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           pickup_points: filteredPoints.map(point => ({
             id: point.id,
@@ -276,10 +210,6 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 200,
         ...handleCORS(),
-        headers: {
-            ...handleCORS().headers,
-            'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           price: price,
           currency: 'BYN',
@@ -293,10 +223,6 @@ exports.handler = async (event, context) => {
       return {
         statusCode: 200,
         ...handleCORS(),
-        headers: {
-            ...handleCORS().headers,
-            'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           pickup_points: pickupPoints.map(point => ({
             id: point.id,
@@ -314,18 +240,13 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 404,
       ...handleCORS(),
-      headers: {
-          ...handleCORS().headers,
-          'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ 
         error: 'Endpoint not found',
         path: path,
         method: httpMethod,
         available_endpoints: [
           'GET /health',
-          'GET /api/delivery/calculate (supports JSONP)',
-          'POST /api/delivery/calculate (supports JSONP)',
+          'POST /api/delivery/calculate', // <-- Теперь обрабатывает v2 API
           'POST /api/pickup-points',
           'POST /api/pickup-point/calculate',
           'GET /pickup-points'
@@ -339,10 +260,6 @@ exports.handler = async (event, context) => {
     return {
       statusCode: 500,
       ...handleCORS(),
-      headers: {
-          ...handleCORS().headers,
-          'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ 
         error: 'Internal Server Error',
         message: error.message
