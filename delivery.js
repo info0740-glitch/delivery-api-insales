@@ -7,33 +7,28 @@ if (typeof window === 'undefined' || typeof document === 'undefined') {
   throw new Error('This script is intended for browser environment only.');
 }
 
-// --- ОБЯЗАТЕЛЬНО: Проверяем и определяляем triggerCustom СРАЗУ ---
-if (typeof $ !== 'undefined') {
-  if (typeof $.fn.triggerCustom !== 'function') {
-    console.log('🔧 Определяем $.fn.triggerCustom');
-    $.fn['triggerCustom'] = function(type, data, options) {
-      if (options == null) {
-        options = {};
-      }
-      options = $.extend({}, {
-        bubbles: true,
-        cancelable: true,
-        detail: data
-      }, {
-        bubbles: options.bubbles,
-        cancelable: options.cancelable
-      });
+// --- ВАЖНО: Функция для безопасного вызова triggerCustom ---
+function safeTriggerCustom($element, type, data, options) {
+  // Проверяем и определяем triggerCustom, если его нет
+  if (typeof $ !== 'undefined' && typeof $.fn.triggerCustom !== 'function') {
+    console.log('🔧 Определяем $.fn.triggerCustom внутри safeTriggerCustom');
+    $.fn['triggerCustom'] = function(t, d, o) {
+      if (o == null) o = {};
+      o = $.extend({}, { bubbles: true, cancelable: true, detail: d }, { bubbles: o.bubbles, cancelable: o.cancelable });
       return this.each(function() {
-        var e;
-        e = new window.CustomEvent(type, options);
+        var e = new window.CustomEvent(t, o);
         return this.dispatchEvent(e);
       });
     };
-  } else {
-    console.log('✅ $.fn.triggerCustom уже определен InSales');
   }
-} else {
-  console.error('❌ jQuery не найден. triggerCustom не будет определен.');
+
+  // Проверяем, определена ли функция на конкретном элементе
+  if (typeof $element.triggerCustom === 'function') {
+    return $element.triggerCustom(type, data, options);
+  } else {
+    console.error(`❌ safeTriggerCustom: $.fn.triggerCustom не определен на элементе при вызове ${type}`);
+    return $element; // Возвращаем элемент для цепочки (хотя вызов не удался)
+  }
 }
 
 const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
@@ -194,7 +189,7 @@ $(document).ready(function() {
     console.log('Данные:', e.originalEvent.detail);
 
     // Сообщаем InSales, что мы готовы
-    $(document).triggerCustom('ready:insales:delivery');
+    safeTriggerCustom($(document), 'ready:insales:delivery');
     console.log('📤 InSales: Сообщили, что готовы обрабатывать события');
 
     // Начинаем отслеживание событий для нашего способа доставки
@@ -237,12 +232,12 @@ function showPickupPointsInterface(orderData) {
   if (!city || city.length < 2) {
     console.warn('⚠️ Город не указан или слишком короткий.');
     // Показать сообщение пользователю
-    $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Введите город для выбора пункта выдачи.');
+    safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'error:insales:delivery', 'Введите город для выбора пункта выдачи.');
     return;
   }
 
   // Показываем спиннер "расчет" для способа доставки
-  $('#order_delivery_variant_id_14999345').triggerCustom('calculating:insales:delivery');
+  safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'calculating:insales:delivery');
 
   // Загружаем ПВЗ
   getPickupPoints(city)
@@ -257,16 +252,16 @@ function showPickupPointsInterface(orderData) {
           displayPickupPointsForSelection($modalBody, points, orderData);
         } else {
           console.error('❌ Модальное окно или контейнер для ПВЗ не найден.');
-          $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Ошибка: интерфейс выбора недоступен.');
+          safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'error:insales:delivery', 'Ошибка: интерфейс выбора недоступен.');
         }
       } else {
         console.log('📭 ПВЗ в городе не найдены.');
-        $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Пункты выдачи в данном городе не найдены.');
+        safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'error:insales:delivery', 'Пункты выдачи в данном городе не найдены.');
       }
     })
     .catch(error => {
       console.error('❌ Ошибка загрузки ПВЗ:', error);
-      $('#order_delivery_variant_id_14999345').triggerCustom('error:insales:delivery', 'Ошибка загрузки пунктов выдачи.');
+      safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'error:insales:delivery', 'Ошибка загрузки пунктов выдачи.');
     });
 }
 
@@ -391,7 +386,7 @@ function handlePickupPointSelection($selectedPoint, orderData) {
       };
 
       // Вызываем update:insales:delivery
-      $('#order_delivery_variant_id_14999345').triggerCustom('update:insales:delivery', deliveryDataForUpdate);
+      safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'update:insales:delivery', deliveryDataForUpdate);
       console.log('🔄 InSales: Обновлена стоимость доставки до', result.price);
 
       // Закрываем модальное окно (опционально)
@@ -403,7 +398,7 @@ function handlePickupPointSelection($selectedPoint, orderData) {
       $priceElement.html('<div class="price-error">Ошибка расчета стоимости</div>');
       // Сбрасываем спиннер, если была ошибка
       // Важно: не сбрасываем цену на 0, если она уже была установлена ранее
-      // $('#order_delivery_variant_id_14999345').triggerCustom('update:insales:delivery', { price: 0, fields_values: [] });
+      // safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'update:insales:delivery', { price: 0, fields_values: [] });
     });
 }
 
