@@ -1,5 +1,4 @@
 // JavaScript для доставки в пункт выдачи с расчетом веса
-// Настройки API
 const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
 
 // Получение пунктов выдачи по городу
@@ -258,12 +257,9 @@ function clearPickupPoints() {
 // Вспомогательные функции для поиска элементов
 function findCityField() {
   const selectors = [
-    'input[name*="city"]',
-    'input[name*="shipping_address[city]"]',
-    '.shipping-city',
-    '.shipping-address-city',
-    '[data-city]',
-    '#shipping_city'
+    'input[name*="shipping_address[full_locality_name]"]',
+    '#shipping_address_full_locality_name',
+    '.co-input-field'
   ];
   
   for (const selector of selectors) {
