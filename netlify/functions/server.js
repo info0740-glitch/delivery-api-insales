@@ -3,6 +3,7 @@
 const pickupPoints = [
   {
     id: 1,
+    city: "Минск",
     latitude: 53.9049,
     longitude: 27.5615,
     shipping_company_handle: 'autolight_express',
@@ -33,6 +34,7 @@ const pickupPoints = [
   },
   {
     id: 2,
+    city: "Брест",
     latitude: 52.0512,
     longitude: 23.9278,
     shipping_company_handle: 'autolight_express',
