@@ -1,7 +1,7 @@
 // JavaScript для доставки в пункт выдачи с расчетом веса
 // Настройки API
 
-
+const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
 // Получение пунктов выдачи по городу
 function getPickupPoints(city) {
   const requestBody = {
