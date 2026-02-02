@@ -225,8 +225,17 @@ $(document).ready(function() {
 // --- Функция для отображения интерфейса выбора ПВЗ ---
 function showPickupPointsInterface(orderData) {
   console.log('🔍 showPickupPointsInterface вызвана');
+  
+  // Валидация входных данных
+  if (!orderData || !orderData.order) {
+    console.error('❌ orderData или orderData.order не определены:', orderData);
+    console.log('Доступные свойства orderData:', orderData ? Object.keys(orderData) : 'undefined');
+    safeTriggerCustom($('#order_delivery_variant_id_14999345'), 'error:insales:delivery', 'Ошибка: данные заказа недоступны. Пожалуйста, заполните адрес доставки.');
+    return;
+  }
+  
   // Получаем город из данных заказа
-  const city = orderData.order.shipping_address?.full_locality_name || '';
+  const city = orderData.order.shipping_address?.full_locality_name || orderData.order.shipping_address?.city || '';
   console.log('📍 Город из данных InSales:', city);
 
   if (!city || city.length < 2) {
@@ -308,21 +317,15 @@ function handlePickupPointSelection($selectedPoint, orderData) {
   console.log('✅ Выбран ПВЗ ID:', pointId, 'Название:', pointTitle);
 
   // Получаем вес заказа из orderData
-  let orderWeight = orderData.order.total_weight || 0;
+  let orderWeight = orderData?.order?.total_weight || 0;
   if (typeof orderWeight === 'string') {
       orderWeight = parseFloat(orderWeight) || 0;
   }
   console.log('📦 Вес заказа из orderData:', orderWeight);
 
-  // Если вес не нашли в orderData, пробуем получить из DOM
+  // Если вес не нашли в orderData, пробуем получить из order_lines
   if (orderWeight <= 0) {
-    // Попробуем найти в DOM как временное решение
-    // const itemsPriceElement = $('#order_items_price'); // Иногда вес хранится рядом
-    // Ищем скрытое поле с весом, если InSales его добавляет
-    // const weightElement = document.querySelector('[data-weight]');
-    // if (weightElement) { orderWeight = parseFloat(weightElement.textContent) || 0; }
-    // Или ищем в order_lines
-    const items = orderData.order.order_lines;
+    const items = orderData?.order?.order_lines || [];
     let totalWeight = items.reduce((sum, item) => sum + (parseFloat(item.weight) || 0), 0);
     orderWeight = totalWeight;
     console.log('📦 Вес заказа из order_lines:', totalWeight);
