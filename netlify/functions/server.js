@@ -159,7 +159,7 @@ exports.handler = async (event, context) => {
         };
       }
 
-      const { order } = requestBody;
+      const order = requestBody?.order || {};
 
       // Извлекаем город из разных возможных источников
       const fullLocalityName = order.shipping_address?.full_locality_name || '';
