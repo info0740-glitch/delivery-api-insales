@@ -1,20 +1,23 @@
 const fs = require('fs');
 const path = require('path');
 
-// Функция для загрузки пунктов выдачи из JSON файла
-function loadPickupPoints() {
+// Загружаем пункты выдачи из встроенного модуля (для надежного деплоя на Netlify)
+let pickupPoints = [];
+try {
+  const { pickupPointsData } = require('./pickup-points-data');
+  pickupPoints = pickupPointsData || [];
+} catch (error) {
+  console.error('Ошибка загрузки пунктов выдачи из модуля:', error);
+  // Fallback: пробуем загрузить из JSON файла
   try {
     const filePath = path.join(__dirname, 'pickup-points.json');
     const data = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Ошибка загрузки пунктов выдачи:', error);
-    // Возвращаем пустой массив в случае ошибки
-    return [];
+    pickupPoints = JSON.parse(data);
+  } catch (e) {
+    console.error('Ошибка загрузки пунктов выдачи из JSON:', e);
+    pickupPoints = [];
   }
 }
-
-const pickupPoints = loadPickupPoints();
 
 // Улучшенная функция фильтрации городов
 function findBestCityMatch(inputCity, pickupPoints) {

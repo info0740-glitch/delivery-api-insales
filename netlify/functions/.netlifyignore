@@ -1,0 +1,14 @@
+# Файлы тестирования
+test-local.js
+test-extended.js
+run-tests.js
+prepare-and-test.js
+run-tests.bat
+run-tests.sh
+TESTING.md
+
+# Временные файлы
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
