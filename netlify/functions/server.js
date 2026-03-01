@@ -19,6 +19,83 @@ try {
   }
 }
 
+// === ЗАГРУЗКА ЦЕН ИЗ ФАЙЛОВ ===
+
+// Цены для курьерской доставки
+let courierPricing = null;
+function loadCourierPricing() {
+  try {
+    const filePath = path.join(__dirname, 'courier-pricing.json');
+    const data = fs.readFileSync(filePath, 'utf8');
+    courierPricing = JSON.parse(data);
+    console.log('✅ Цены курьерской доставки загружены');
+    return true;
+  } catch (error) {
+    console.error('Ошибка загрузки цен курьерской доставки:', error);
+    // Fallback
+    courierPricing = {
+      currency: 'BYN',
+      delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+      weight_pricing: [
+        { max_weight: 1, price: 12.90 },
+        { max_weight: 2, price: 14.70 },
+        { max_weight: 3, price: 16.40 },
+        { max_weight: 5, price: 18.20 },
+        { max_weight: 10, price: 21.60 },
+        { max_weight: 15, price: 25.40 },
+        { max_weight: 20, price: 28.90 },
+        { max_weight: 25, price: 32.10 },
+        { max_weight: 30, price: 33.80 },
+        { max_weight: 35, price: 36.10 },
+        { max_weight: 40, price: 38.50 },
+        { max_weight: 45, price: 40.60 },
+        { max_weight: 50, price: 42.80 }
+      ]
+    };
+    return false;
+  }
+}
+
+// Цены для ПВЗ
+let pickupPricing = null;
+function loadPickupPricing() {
+  try {
+    const filePath = path.join(__dirname, 'pickup-pricing.json');
+    const data = fs.readFileSync(filePath, 'utf8');
+    pickupPricing = JSON.parse(data);
+    console.log('✅ Цены для ПВЗ загружены');
+    return true;
+  } catch (error) {
+    console.error('Ошибка загрузки цен ПВЗ:', error);
+    // Fallback
+    pickupPricing = {
+      currency: 'BYN',
+      delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+      weight_pricing: [
+        { max_weight: 5, price: 10.0 },
+        { max_weight: 10, price: 12.0 },
+        { max_weight: 20, price: 14.0 },
+        { max_weight: 30, price: 16.0 },
+        { max_weight: 35, price: 18.0 },
+        { max_weight: 40, price: 20.0 },
+        { max_weight: 55, price: 35.0 },
+        { max_weight: 90, price: 50.0 },
+        { max_weight: 120, price: 60.0 },
+        { max_weight: 149, price: 70.0 },
+        { max_weight: 200, price: 100.0 },
+        { max_weight: 250, price: 150.0 }
+      ]
+    };
+    return false;
+  }
+}
+
+// Загружаем цены при старте
+loadCourierPricing();
+loadPickupPricing();
+
+// === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+
 // Улучшенная функция фильтрации городов
 function findBestCityMatch(inputCity, pickupPoints) {
   if (!inputCity || !inputCity.trim()) {
@@ -29,30 +106,27 @@ function findBestCityMatch(inputCity, pickupPoints) {
   
   // Удаляем префиксы и общие слова
   const cleanInput = normalizedInput
-    .replace(/^г\.?\s*/i, '')     // удаляем "г.", "г"
-    .replace(/^город\s+/i, '')     // удаляем "город"
-    .replace(/^п\.?\s*/i, '')     // удаляем "п.", "п" (поселок)
-    .replace(/^с\.?\s*/i, '')     // удаляем "с.", "с" (село)
-    .replace(/\s+беларусь$/i, '') // удаляем "беларусь" в конце
-    .replace(/[,;].*$/, '')       // удаляем после запятой/точки с запятой
-    .replace(/\s+обл\.?/i, '')    // удаляем "обл.", "обл" (область)
-    .replace(/\s+р-н\.?/i, '')    // удаляем "р-н", "р-н." (район)
+    .replace(/^г\.?\s*/i, '')
+    .replace(/^город\s+/i, '')
+    .replace(/^п\.?\s*/i, '')
+    .replace(/^с\.?\s*/i, '')
+    .replace(/\s+беларусь$/i, '')
+    .replace(/[,;].*$/, '')
+    .replace(/\s+обл\.?/i, '')
+    .replace(/\s+р-н\.?/i, '')
     .trim();
 
-  // Получаем все уникальные города
   const uniqueCities = [...new Set(pickupPoints.map(point => point.city))];
   
-  // Точное совпадение (максимальный приоритет)
+  // Точное совпадение
   let exactMatches = uniqueCities.filter(city => 
     city.toLowerCase() === cleanInput
   );
   if (exactMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      exactMatches.includes(point.city)
-    );
+    return pickupPoints.filter(point => exactMatches.includes(point.city));
   }
 
-  // Частичное совпадение слов (высокий приоритет)
+  // Частичное совпадение
   let wordMatches = uniqueCities.filter(city => {
     const cleanCity = city.toLowerCase()
       .replace(/^г\.?\s*/i, '')
@@ -62,49 +136,74 @@ function findBestCityMatch(inputCity, pickupPoints) {
            cleanCity.includes(cleanInput);
   });
   if (wordMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      wordMatches.includes(point.city)
-    );
+    return pickupPoints.filter(point => wordMatches.includes(point.city));
   }
 
-  // Частичное совпадение символов (средний приоритет)
-  let charMatches = uniqueCities.filter(city => {
-    const cleanCity = city.toLowerCase()
-      .replace(/^г\.?\s*/i, '')
-      .replace(/^город\s+/i, '');
-    return cleanInput.includes(cleanCity) || cleanCity.includes(cleanInput);
-  });
-  if (charMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      charMatches.includes(point.city)
-    );
-  }
-
-  // Нет совпадений - возвращаем точки по умолчанию (например, крупные города)
+  // По умолчанию - основные города
   return pickupPoints.filter(point => 
     ['Минск', 'Гомель', 'Витебск', 'Могилев', 'Гродно', 'Брест'].includes(point.city)
   );
 }
 
-// Расчет стоимости доставки по весу
-function calculatePrice(weight) {
-  // Новые тарифы на основе актуальной информации
-  if (weight <= 5.0) return 10.0;
-  if (weight <= 10.0) return 12.0;
-  if (weight <= 20.0) return 14.0;
-  if (weight <= 30.0) return 16.0;
-  if (weight <= 35.0) return 18.0;
-  if (weight <= 40.0) return 20.0;
-  if (weight <= 55.0) return 35.0;
-  if (weight <= 90.0) return 50.0;
-  if (weight <= 120.0) return 60.0;
-  if (weight <= 149.0) return 70.0;
-  if (weight <= 200.0) return 100.0;
-  if (weight <= 250.0) return 150.0;
-  return 200.0; // Для веса свыше 250 кг
+// Расчет стоимости доставки в ПВЗ (из файла)
+function calculatePickupPrice(weight) {
+  const w = weight || 0;
+  
+  if (!pickupPricing || !pickupPricing.weight_pricing) {
+    return 10.0; // fallback
+  }
+  
+  for (let step of pickupPricing.weight_pricing) {
+    if (w <= step.max_weight) {
+      return step.price;
+    }
+  }
+  
+  // Для веса больше максимального
+  if (pickupPricing.oversized_pricing) {
+    const lastStep = pickupPricing.weight_pricing[pickupPricing.weight_pricing.length - 1];
+    const extraKg = w - lastStep.max_weight;
+    return pickupPricing.oversized_pricing.base_price + (extraKg * pickupPricing.oversized_pricing.price_per_kg);
+  }
+  
+  const lastStep = pickupPricing.weight_pricing[pickupPricing.weight_pricing.length - 1];
+  return lastStep.price + Math.ceil((w - lastStep.max_weight) / 5) * 5;
 }
 
+// Расчет стоимости курьерской доставки (из файла)
+function calculateCourierPrice(weight) {
+  const w = weight || 0;
+  
+  if (!courierPricing || !courierPricing.weight_pricing) {
+    return { price: 0, currency: 'BYN' };
+  }
+  
+  for (let step of courierPricing.weight_pricing) {
+    if (w <= step.max_weight) {
+      return {
+        price: step.price,
+        currency: courierPricing.currency || 'BYN'
+      };
+    }
+  }
+  
+  // Для веса больше максимального
+  const lastStep = courierPricing.weight_pricing[courierPricing.weight_pricing.length - 1];
+  if (lastStep) {
+    const extraPrice = Math.ceil((w - lastStep.max_weight) / 5) * 3;
+    return {
+      price: lastStep.price + extraPrice,
+      currency: courierPricing.currency || 'BYN'
+    };
+  }
+  
+  return { price: 0, currency: 'BYN' };
+}
+
+// === ОБРАБОТЧИК ЗАПРОСОВ ===
+
 exports.handler = async (event, context) => {
+  // CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -119,167 +218,23 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // Обработка специальных запросов
+    // Парсим тело запроса
+    let requestBody = {};
     if (event.body) {
-      const requestBody = JSON.parse(event.body);
-      
-      // Проверка на пинг/информационный запрос
-      if (requestBody.action === 'ping' || requestBody.action === 'getCities' || 
-          requestBody.ping === true || requestBody.get_cities === true) {
-        
-        const uniqueCities = [...new Set(pickupPoints.map(point => point.city))].sort();
-        
-        return {
-          statusCode: 200,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            success: true,
-            message: 'InSales External Delivery API v2 - Avtolayt Express',
-            cities: uniqueCities,
-            pickup_points_count: pickupPoints.length,
-            cities_count: uniqueCities.length,
-            weight_ranges: {
-              '5кг': 10.0,
-              '10кг': 12.0,
-              '20кг': 14.0,
-              '30кг': 16.0,
-              '35кг': 18.0,
-              '40кг': 20.0,
-              '55кг': 35.0,
-              '90кг': 50.0,
-              '120кг': 60.0,
-              '149кг': 70.0,
-              '200кг': 100.0,
-              '250кг': 150.0,
-              '250кг+': 200.0
-            }
-          })
-        };
+      try {
+        requestBody = JSON.parse(event.body);
+      } catch (e) {
+        // Некорректный JSON
       }
+    }
 
-      const order = requestBody?.order || {};
+    const path = event.path || '';
 
-      // Извлекаем город из разных возможных источников
-      const fullLocalityName = order.shipping_address?.full_locality_name || '';
-      const locationCity = order.shipping_address?.location?.city || '';
-      const locationSettlement = order.shipping_address?.location?.settlement || '';
-      const shippingCity = order.shipping_address?.city || '';
+    // === API для курьерской доставки ===
+    if (path.includes('/courier') || requestBody.delivery_type === 'courier') {
+      const weight = requestBody.weight || requestBody.order?.total_weight || 0;
+      const calculation = calculateCourierPrice(parseFloat(weight));
       
-      // Пытаемся определить город по разным полям
-      const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
-      
-      // Получаем вес заказа
-      const totalWeightStr = order.total_weight || '0';
-      const totalWeight = parseFloat(totalWeightStr) || 0;
-
-      // Улучшенная фильтрация ПВЗ по городу
-      const filteredPoints = findBestCityMatch(city, pickupPoints);
-
-      const tariffs = filteredPoints.map(point => {
-        const price = calculatePrice(totalWeight);
-        
-        // Формируем полный адрес для full_locality_name
-        const fullAddress = point.delivery_address || 
-                           `${point.address}, ${point.city}, Беларусь`;
-
-        // Основной ответ по формату InSales документации
-        return {
-          // Базовые поля тарифа
-          id: point.id,                    // Добавляем id для pickup points
-          tariff_id: `pvz_${point.id}`,    // Обязательное поле для множественных тарифов
-          shipping_company_handle: 'autolight_express',
-          price: price,
-          currency: 'BYN',
-          
-          // Информация о доставке
-          title: `${point.name} ${point.address}`,
-          description: `(${point.working_hours})`,
-          
-          // Интервал доставки
-          delivery_interval: {
-            min_days: 1,
-            max_days: 1,
-            description: `1 день`
-          },
-          
-          // КРИТИЧНО: Правильный формат shipping_address по документации
-          shipping_address: {
-            // Это поле должно заполнить UI InSales
-            full_locality_name: fullAddress,
-            // Дополнительные поля адреса
-            address: point.address,
-            city: point.city,
-            country: 'Беларусь',
-            postal_code: '',
-            
-            // Дополнительная информация для pickup point
-            pickup_point_name: point.name,
-            pickup_point_hours: point.working_hours
-          },
-          
-          // КРИТИЧНО: fields_values по официальному формату документации
-          fields_values: [
-            {
-              // Поле для полного адреса в shipping_address
-              handle: 'shipping_address[full_locality_name]',
-              value: fullAddress,
-              name: 'Полный адрес доставки'
-            },
-            {
-              // Поле для заполнения адреса в UI (по документации InSales)
-              handle: 'shipping_address[address]',
-              value: point.address,
-              name: 'Адрес доставки'
-            },
-            {
-              // Альтернативный формат поля адреса
-              handle: 'shipping_address_address',
-              value: point.address
-            },
-            {
-              // Дополнительное поле с полным адресом
-              handle: 'full_locality_name',
-              value: fullAddress
-            },
-            {
-              // Простое поле адреса
-              handle: 'address',
-              value: fullAddress
-            },
-            {
-              // Поле с ID pickup point
-              handle: 'pickup_point_id',
-              value: point.id.toString()
-            },
-            {
-              // Поле с названием pickup point
-              handle: 'pickup_point_name',
-              value: point.name
-            },
-            {
-              // Поле с городом
-              handle: 'city',
-              value: point.city
-            },
-            {
-              // Поле со страной
-              handle: 'country',
-              value: 'Беларусь'
-            },
-            {
-              // Поле с рабочими часами
-              handle: 'pickup_point_hours',
-              value: point.working_hours
-            }
-          ]
-        };
-      });
-
       return {
         statusCode: 200,
         headers: {
@@ -288,27 +243,140 @@ exports.handler = async (event, context) => {
           'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(tariffs)
+        body: JSON.stringify({
+          price: calculation.price,
+          currency: calculation.currency,
+          weight: parseFloat(weight),
+          delivery_days: courierPricing?.delivery_days || { min: 1, max: 2, description: '1-2 дня' },
+          delivery_type: 'courier'
+        })
       };
     }
 
-    // Если нет body или не JSON
+    // === API для расчета ПВЗ (простой) ===
+    if (path.includes('/pickup/calculate') || requestBody.delivery_type === 'pickup_calculate') {
+      const weight = requestBody.weight || requestBody.order?.total_weight || 0;
+      const price = calculatePickupPrice(parseFloat(weight));
+      
+      return {
+        statusCode: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          price: price,
+          currency: pickupPricing?.currency || 'BYN',
+          weight: parseFloat(weight),
+          delivery_days: pickupPricing?.delivery_days || { min: 1, max: 2, description: '1-2 дня' },
+          delivery_type: 'pickup'
+        })
+      };
+    }
+
+    // === API для информации ===
+    if (requestBody.action === 'ping' || requestBody.action === 'getCities' || 
+        requestBody.ping === true || requestBody.get_cities === true) {
+      
+      const uniqueCities = [...new Set(pickupPoints.map(point => point.city))].sort();
+      
+      return {
+        statusCode: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          success: true,
+          message: 'InSales External Delivery API - Avtolayt Express',
+          version: '2.2.0',
+          cities: uniqueCities,
+          pickup_points_count: pickupPoints.length,
+          cities_count: uniqueCities.length,
+          features: ['pickup_points', 'courier_delivery'],
+          courier: {
+            delivery_days: courierPricing?.delivery_days,
+            currency: courierPricing?.currency,
+            weight_grades: courierPricing?.weight_pricing?.length || 0
+          },
+          pickup: {
+            delivery_days: pickupPricing?.delivery_days,
+            currency: pickupPricing?.currency,
+            weight_grades: pickupPricing?.weight_pricing?.length || 0
+          }
+        })
+      };
+    }
+
+    // === API для ПВЗ (по умолчанию - список пунктов) ===
+    const order = requestBody?.order || {};
+
+    // Извлекаем город
+    const fullLocalityName = order.shipping_address?.full_locality_name || '';
+    const locationCity = order.shipping_address?.location?.city || '';
+    const locationSettlement = order.shipping_address?.location?.settlement || '';
+    const shippingCity = order.shipping_address?.city || '';
+    
+    const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
+    
+    // Получаем вес
+    const totalWeightStr = order.total_weight || '0';
+    const totalWeight = parseFloat(totalWeightStr) || 0;
+
+    // Фильтрация ПВЗ по городу
+    const filteredPoints = findBestCityMatch(city, pickupPoints);
+
+    // Формируем ответ
+    const tariffs = filteredPoints.map(point => {
+      const price = calculatePickupPrice(totalWeight);
+      const fullAddress = point.delivery_address || `${point.address}, ${point.city}, Беларусь`;
+
+      return {
+        id: point.id,
+        tariff_id: `pvz_${point.id}`,
+        shipping_company_handle: 'autolight_express',
+        price: price,
+        currency: pickupPricing?.currency || 'BYN',
+        title: `${point.name} ${point.address}`,
+        description: `(${point.working_hours})`,
+        delivery_interval: pickupPricing?.delivery_days || { min: 1, max: 2 },
+        shipping_address: {
+          full_locality_name: fullAddress,
+          address: point.address,
+          city: point.city,
+          country: 'Беларусь',
+          postal_code: '',
+          pickup_point_name: point.name,
+          pickup_point_hours: point.working_hours
+        },
+        fields_values: [
+          { handle: 'shipping_address[full_locality_name]', value: fullAddress, name: 'Полный адрес' },
+          { handle: 'shipping_address[address]', value: point.address, name: 'Адрес' },
+          { handle: 'pickup_point_id', value: point.id.toString() },
+          { handle: 'pickup_point_name', value: point.name },
+          { handle: 'city', value: point.city },
+          { handle: 'pickup_point_hours', value: point.working_hours }
+        ]
+      };
+    });
+
     return {
-      statusCode: 400,
+      statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ 
-        error: 'Invalid request format',
-        errors: ['Request body must be valid JSON'],
-        warnings: []
-      })
+      body: JSON.stringify(tariffs)
     };
 
   } catch (error) {
+    console.error('Ошибка:', error);
     return {
       statusCode: 500,
       headers: {
@@ -319,8 +387,7 @@ exports.handler = async (event, context) => {
       },
       body: JSON.stringify({ 
         error: error.message,
-        errors: [error.message],
-        warnings: []
+        errors: [error.message]
       })
     };
   }
