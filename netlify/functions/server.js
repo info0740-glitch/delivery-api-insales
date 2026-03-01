@@ -1,105 +1,112 @@
 const fs = require('fs');
 const path = require('path');
 
-// Загружаем пункты выдачи из встроенного модуля (для надежного деплоя на Netlify)
-let pickupPoints = [];
-try {
-  const { pickupPointsData } = require('./pickup-points-data');
-  pickupPoints = pickupPointsData || [];
-} catch (error) {
-  console.error('Ошибка загрузки пунктов выдачи из модуля:', error);
-  // Fallback: пробуем загрузить из JSON файла
+// Функция загрузки пунктов выдачи - вызывается при каждом запросе
+function loadPickupPoints() {
   try {
+    // Сначала пробуем встроенный модуль
+    try {
+      const { pickupPointsData } = require('./pickup-points-data');
+      if (pickupPointsData && pickupPointsData.length > 0) {
+        console.log('✅ Пункты выдачи загружены из модуля');
+        return pickupPointsData;
+      }
+    } catch (moduleError) {
+      // Модуль не найден или ошибка - переходим к JSON
+    }
+    
+    // Пробуем загрузить из JSON файла
     const filePath = path.join(__dirname, 'pickup-points.json');
     const data = fs.readFileSync(filePath, 'utf8');
-    pickupPoints = JSON.parse(data);
-  } catch (e) {
-    console.error('Ошибка загрузки пунктов выдачи из JSON:', e);
-    pickupPoints = [];
+    const points = JSON.parse(data);
+    console.log('✅ Пункты выдачи загружены из JSON');
+    return points || [];
+  } catch (error) {
+    console.error('⚠️ Ошибка загрузки пунктов выдачи:', error.message);
+    return [];
   }
 }
 
 // === ЗАГРУЗКА ЦЕН ИЗ ФАЙЛОВ ===
 
-// Цены для курьерской доставки
-let courierPricing = null;
+// Дефолтные цены (fallback)
+const DEFAULT_COURIER_PRICING = {
+  currency: 'BYN',
+  delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+  weight_pricing: [
+    { max_weight: 1, price: 12.90 },
+    { max_weight: 2, price: 14.70 },
+    { max_weight: 3, price: 16.40 },
+    { max_weight: 5, price: 18.20 },
+    { max_weight: 10, price: 21.60 },
+    { max_weight: 15, price: 25.40 },
+    { max_weight: 20, price: 28.90 },
+    { max_weight: 25, price: 32.10 },
+    { max_weight: 30, price: 33.80 },
+    { max_weight: 35, price: 36.10 },
+    { max_weight: 40, price: 38.50 },
+    { max_weight: 45, price: 40.60 },
+    { max_weight: 50, price: 42.80 }
+  ]
+};
+
+const DEFAULT_PICKUP_PRICING = {
+  currency: 'BYN',
+  delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+  weight_pricing: [
+    { max_weight: 5, price: 10.0 },
+    { max_weight: 10, price: 12.0 },
+    { max_weight: 20, price: 14.0 },
+    { max_weight: 30, price: 16.0 },
+    { max_weight: 35, price: 18.0 },
+    { max_weight: 40, price: 20.0 },
+    { max_weight: 55, price: 35.0 },
+    { max_weight: 90, price: 50.0 },
+    { max_weight: 120, price: 60.0 },
+    { max_weight: 149, price: 70.0 },
+    { max_weight: 200, price: 100.0 },
+    { max_weight: 250, price: 150.0 }
+  ]
+};
+
+// Цены для курьерской доставки - загружаются при каждом запросе
 function loadCourierPricing() {
   try {
     const filePath = path.join(__dirname, 'courier-pricing.json');
     const data = fs.readFileSync(filePath, 'utf8');
-    courierPricing = JSON.parse(data);
-    console.log('✅ Цены курьерской доставки загружены');
-    return true;
+    const pricing = JSON.parse(data);
+    console.log('✅ Цены курьерской доставки загружены из JSON');
+    return pricing;
   } catch (error) {
-    console.error('Ошибка загрузки цен курьерской доставки:', error);
-    // Fallback
-    courierPricing = {
-      currency: 'BYN',
-      delivery_days: { min: 1, max: 2, description: '1-2 дня' },
-      weight_pricing: [
-        { max_weight: 1, price: 12.90 },
-        { max_weight: 2, price: 14.70 },
-        { max_weight: 3, price: 16.40 },
-        { max_weight: 5, price: 18.20 },
-        { max_weight: 10, price: 21.60 },
-        { max_weight: 15, price: 25.40 },
-        { max_weight: 20, price: 28.90 },
-        { max_weight: 25, price: 32.10 },
-        { max_weight: 30, price: 33.80 },
-        { max_weight: 35, price: 36.10 },
-        { max_weight: 40, price: 38.50 },
-        { max_weight: 45, price: 40.60 },
-        { max_weight: 50, price: 42.80 }
-      ]
-    };
-    return false;
+    console.warn('⚠️ Не удалось загрузить courier-pricing.json, используется дефолт:', error.message);
+    return DEFAULT_COURIER_PRICING;
   }
 }
 
-// Цены для ПВЗ
-let pickupPricing = null;
+// Цены для ПВЗ - загружаются при каждом запросе
 function loadPickupPricing() {
   try {
     const filePath = path.join(__dirname, 'pickup-pricing.json');
     const data = fs.readFileSync(filePath, 'utf8');
-    pickupPricing = JSON.parse(data);
-    console.log('✅ Цены для ПВЗ загружены');
-    return true;
+    const pricing = JSON.parse(data);
+    console.log('✅ Цены для ПВЗ загружены из JSON');
+    return pricing;
   } catch (error) {
-    console.error('Ошибка загрузки цен ПВЗ:', error);
-    // Fallback
-    pickupPricing = {
-      currency: 'BYN',
-      delivery_days: { min: 1, max: 2, description: '1-2 дня' },
-      weight_pricing: [
-        { max_weight: 5, price: 10.0 },
-        { max_weight: 10, price: 12.0 },
-        { max_weight: 20, price: 14.0 },
-        { max_weight: 30, price: 16.0 },
-        { max_weight: 35, price: 18.0 },
-        { max_weight: 40, price: 20.0 },
-        { max_weight: 55, price: 35.0 },
-        { max_weight: 90, price: 50.0 },
-        { max_weight: 120, price: 60.0 },
-        { max_weight: 149, price: 70.0 },
-        { max_weight: 200, price: 100.0 },
-        { max_weight: 250, price: 150.0 }
-      ]
-    };
-    return false;
+    console.warn('⚠️ Не удалось загрузить pickup-pricing.json, используется дефолт:', error.message);
+    return DEFAULT_PICKUP_PRICING;
   }
 }
-
-// Загружаем цены при старте
-loadCourierPricing();
-loadPickupPricing();
 
 // === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
 // Улучшенная функция фильтрации городов
-function findBestCityMatch(inputCity, pickupPoints) {
+function findBestCityMatch(inputCity, points) {
+  if (!points || points.length === 0) {
+    return [];
+  }
+  
   if (!inputCity || !inputCity.trim()) {
-    return pickupPoints;
+    return points;
   }
 
   const normalizedInput = inputCity.toLowerCase().trim();
@@ -116,14 +123,14 @@ function findBestCityMatch(inputCity, pickupPoints) {
     .replace(/\s+р-н\.?/i, '')
     .trim();
 
-  const uniqueCities = [...new Set(pickupPoints.map(point => point.city))];
+  const uniqueCities = [...new Set(points.map(point => point.city))];
   
   // Точное совпадение
   let exactMatches = uniqueCities.filter(city => 
     city.toLowerCase() === cleanInput
   );
   if (exactMatches.length > 0) {
-    return pickupPoints.filter(point => exactMatches.includes(point.city));
+    return points.filter(point => exactMatches.includes(point.city));
   }
 
   // Частичное совпадение
@@ -136,64 +143,66 @@ function findBestCityMatch(inputCity, pickupPoints) {
            cleanCity.includes(cleanInput);
   });
   if (wordMatches.length > 0) {
-    return pickupPoints.filter(point => wordMatches.includes(point.city));
+    return points.filter(point => wordMatches.includes(point.city));
   }
 
   // По умолчанию - основные города
-  return pickupPoints.filter(point => 
+  return points.filter(point => 
     ['Минск', 'Гомель', 'Витебск', 'Могилев', 'Гродно', 'Брест'].includes(point.city)
   );
 }
 
 // Расчет стоимости доставки в ПВЗ (из файла)
-function calculatePickupPrice(weight) {
+function calculatePickupPrice(weight, pricing) {
   const w = weight || 0;
+  const pricingData = pricing || loadPickupPricing();
   
-  if (!pickupPricing || !pickupPricing.weight_pricing) {
+  if (!pricingData || !pricingData.weight_pricing) {
     return 10.0; // fallback
   }
   
-  for (let step of pickupPricing.weight_pricing) {
+  for (let step of pricingData.weight_pricing) {
     if (w <= step.max_weight) {
       return step.price;
     }
   }
   
   // Для веса больше максимального
-  if (pickupPricing.oversized_pricing) {
-    const lastStep = pickupPricing.weight_pricing[pickupPricing.weight_pricing.length - 1];
+  if (pricingData.oversized_pricing) {
+    const lastStep = pricingData.weight_pricing[pricingData.weight_pricing.length - 1];
     const extraKg = w - lastStep.max_weight;
-    return pickupPricing.oversized_pricing.base_price + (extraKg * pickupPricing.oversized_pricing.price_per_kg);
+    return pricingData.oversized_pricing.base_price + (extraKg * pricingData.oversized_pricing.price_per_kg);
   }
   
-  const lastStep = pickupPricing.weight_pricing[pickupPricing.weight_pricing.length - 1];
+  const lastStep = pricingData.weight_pricing[pricingData.weight_pricing.length - 1];
   return lastStep.price + Math.ceil((w - lastStep.max_weight) / 5) * 5;
 }
 
 // Расчет стоимости курьерской доставки (из файла)
-function calculateCourierPrice(weight) {
+function calculateCourierPrice(weight, pricing) {
   const w = weight || 0;
+  const pricingData = pricing || loadCourierPricing();
   
-  if (!courierPricing || !courierPricing.weight_pricing) {
+  if (!pricingData || !pricingData.weight_pricing) {
     return { price: 0, currency: 'BYN' };
   }
   
-  for (let step of courierPricing.weight_pricing) {
+  for (let step of pricingData.weight_pricing) {
     if (w <= step.max_weight) {
       return {
         price: step.price,
-        currency: courierPricing.currency || 'BYN'
+        currency: pricingData.currency || 'BYN'
       };
     }
   }
   
   // Для веса больше максимального
-  const lastStep = courierPricing.weight_pricing[courierPricing.weight_pricing.length - 1];
+  const lastStep = pricingData.weight_pricing[pricingData.weight_pricing.length - 1];
   if (lastStep) {
     const extraPrice = Math.ceil((w - lastStep.max_weight) / 5) * 3;
     return {
       price: lastStep.price + extraPrice,
-      currency: courierPricing.currency || 'BYN'
+      currency: pricingData.currency || 'BYN'
     };
   }
   
@@ -229,11 +238,16 @@ exports.handler = async (event, context) => {
     }
 
     const path = event.path || '';
+    
+    // Загружаем данные для этого запроса
+    const courierPricing = loadCourierPricing();
+    const pickupPricing = loadPickupPricing();
+    const pickupPoints = loadPickupPoints();
 
     // === API для курьерской доставки ===
     if (path.includes('/courier') || requestBody.delivery_type === 'courier') {
       const weight = requestBody.weight || requestBody.order?.total_weight || 0;
-      const calculation = calculateCourierPrice(parseFloat(weight));
+      const calculation = calculateCourierPrice(parseFloat(weight), courierPricing);
       
       return {
         statusCode: 200,
@@ -256,7 +270,7 @@ exports.handler = async (event, context) => {
     // === API для расчета ПВЗ (простой) ===
     if (path.includes('/pickup/calculate') || requestBody.delivery_type === 'pickup_calculate') {
       const weight = requestBody.weight || requestBody.order?.total_weight || 0;
-      const price = calculatePickupPrice(parseFloat(weight));
+      const price = calculatePickupPrice(parseFloat(weight), pickupPricing);
       
       return {
         statusCode: 200,
@@ -280,7 +294,7 @@ exports.handler = async (event, context) => {
     if (requestBody.action === 'ping' || requestBody.action === 'getCities' || 
         requestBody.ping === true || requestBody.get_cities === true) {
       
-      const uniqueCities = [...new Set(pickupPoints.map(point => point.city))].sort();
+      const uniqueCities = [...new Set(pickupPoints.map(point => point.city ?? ''))].filter(c => c).sort();
       
       return {
         statusCode: 200,
@@ -332,7 +346,7 @@ exports.handler = async (event, context) => {
 
     // Формируем ответ
     const tariffs = filteredPoints.map(point => {
-      const price = calculatePickupPrice(totalWeight);
+      const price = calculatePickupPrice(totalWeight, pickupPricing);
       const fullAddress = point.delivery_address || `${point.address}, ${point.city}, Беларусь`;
 
       return {
