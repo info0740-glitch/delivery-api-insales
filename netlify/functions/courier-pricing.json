@@ -7,19 +7,19 @@
     "description": "1-2 дня"
   },
   "weight_pricing": [
-    { "max_weight": 1, "price": 13.00 },
-    { "max_weight": 2, "price": 14.00 },
-    { "max_weight": 3, "price": 17.00 },
-    { "max_weight": 5, "price": 19.00 },
-    { "max_weight": 10, "price": 22.00 },
-    { "max_weight": 15, "price": 26.00 },
-    { "max_weight": 20, "price": 29.00 },
-    { "max_weight": 25, "price": 32.00 },
-    { "max_weight": 30, "price": 34.00 },
-    { "max_weight": 35, "price": 36.00 },
-    { "max_weight": 40, "price": 39.00 },
-    { "max_weight": 45, "price": 41.00 },
-    { "max_weight": 50, "price": 43.00 }
+    { "max_weight": 1, "price": 13 },
+    { "max_weight": 2, "price": 14 },
+    { "max_weight": 3, "price": 17 },
+    { "max_weight": 5, "price": 19 },
+    { "max_weight": 10, "price": 22 },
+    { "max_weight": 15, "price": 26 },
+    { "max_weight": 20, "price": 29 },
+    { "max_weight": 25, "price": 32 },
+    { "max_weight": 30, "price": 34 },
+    { "max_weight": 35, "price": 36 },
+    { "max_weight": 40, "price": 39 },
+    { "max_weight": 45, "price": 41 },
+    { "max_weight": 50, "price": 43 }
   ],
   "oversized_pricing": {
     "base_price": 43.00,
