@@ -31,23 +31,28 @@ function loadPickupPoints() {
 
 // Дефолтные цены (fallback)
 const DEFAULT_COURIER_PRICING = {
-  currency: 'BYN',
-  delivery_days: { min: 1, max: 2, description: '1-2 дня' },
-  weight_pricing: [
-    { max_weight: 1, price: 12.90 },
-    { max_weight: 2, price: 14.70 },
-    { max_weight: 3, price: 16.40 },
-    { max_weight: 5, price: 18.20 },
-    { max_weight: 10, price: 21.60 },
-    { max_weight: 15, price: 25.40 },
-    { max_weight: 20, price: 28.90 },
-    { max_weight: 25, price: 32.10 },
-    { max_weight: 30, price: 33.80 },
-    { max_weight: 35, price: 36.10 },
-    { max_weight: 40, price: 38.50 },
-    { max_weight: 45, price: 40.60 },
-    { max_weight: 50, price: 42.80 }
+  "currency": "BYN",
+  "delivery_days": {
+    "min": 1,
+    "max": 2,
+    "description": "1-2 дня"
+  },
+  "weight_pricing": [
+    { "max_weight": 1, "price": 13 },
+    { "max_weight": 2, "price": 14 },
+    { "max_weight": 3, "price": 17 },
+    { "max_weight": 5, "price": 19 },
+    { "max_weight": 10, "price": 22 },
+    { "max_weight": 15, "price": 26 },
+    { "max_weight": 20, "price": 29 },
+    { "max_weight": 25, "price": 32 },
+    { "max_weight": 30, "price": 34 },
+    { "max_weight": 35, "price": 36 },
+    { "max_weight": 40, "price": 39 },
+    { "max_weight": 45, "price": 41 },
+    { "max_weight": 50, "price": 43 }
   ]
+
 };
 
 const DEFAULT_PICKUP_PRICING = {
