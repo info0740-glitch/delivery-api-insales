@@ -22,7 +22,7 @@ try {
 // Улучшенная функция фильтрации городов
 function findBestCityMatch(inputCity, pickupPoints) {
   if (!inputCity || !inputCity.trim()) {
-    return pickupPoints;
+    return [];
   }
 
   const normalizedInput = inputCity.toLowerCase().trim();
@@ -172,10 +172,77 @@ exports.handler = async (event, context) => {
       
       // Пытаемся определить город по разным полям
       const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
+      const isCityEmpty = !city || !city.trim();
       
       // Получаем вес заказа
       const totalWeightStr = order.total_weight || '0';
       const totalWeight = parseFloat(totalWeightStr) || 0;
+
+      if (isCityEmpty) {
+        const price = calculatePrice(totalWeight);
+        const placeholderTariff = [{
+          id: 'pvz_enter_city',
+          tariff_id: 'pvz_enter_city',
+          shipping_company_handle: 'autolight_express',
+          price,
+          currency: 'BYN',
+          title: 'Доставка в пункт выдачи',
+          description: 'Укажите населённый пункт, чтобы увидеть адреса',
+          delivery_interval: {
+            min_days: 1,
+            max_days: 1,
+            description: '1 день'
+          },
+          shipping_address: {
+            full_locality_name: '',
+            address: '',
+            city: '',
+            country: 'Беларусь',
+            postal_code: '',
+            pickup_point_name: '',
+            pickup_point_hours: ''
+          },
+          fields_values: [
+            {
+              handle: 'shipping_address[full_locality_name]',
+              value: '',
+              name: 'Полный адрес доставки'
+            },
+            {
+              handle: 'shipping_address[address]',
+              value: '',
+              name: 'Адрес доставки'
+            },
+            {
+              handle: 'shipping_address_address',
+              value: ''
+            },
+            {
+              handle: 'full_locality_name',
+              value: ''
+            },
+            {
+              handle: 'address',
+              value: ''
+            },
+            {
+              handle: 'pickup_point_hint',
+              value: 'Укажите населённый пункт, чтобы выбрать адрес'
+            }
+          ]
+        }];
+
+        return {
+          statusCode: 200,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(placeholderTariff)
+        };
+      }
 
       // Улучшенная фильтрация ПВЗ по городу
       const filteredPoints = findBestCityMatch(city, pickupPoints);
