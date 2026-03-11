@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
@@ -23,20 +22,74 @@ const CONFIG = {
     LOG_LEVEL: 'info'
 };
 
-// Ценообразование по весу
-const WEIGHT_PRICING = {
-    base_price: 5.0,          // Базовая стоимость доставки
-    weight_steps: [
-        { max_weight: 1, price: 5.0 },
-        { max_weight: 3, price: 7.0 },
-        { max_weight: 5, price: 10.0 },
-        { max_weight: 10, price: 15.0 },
-        { max_weight: 20, price: 25.0 },
-        { max_weight: 50, price: 40.0 }
-    ]
-};
+// === ЗАГРУЗКА ЦЕН ИЗ ВНЕШНИХ ФАЙЛОВ ===
 
-// Данные о пунктах выдачи (упрощенная версия для демо)
+// Цены для курьерской доставки
+let COURIER_PRICING = {};
+function loadCourierPricing() {
+    try {
+        const pricingPath = path.join(__dirname, 'courier-pricing.json');
+        const pricingData = fs.readFileSync(pricingPath, 'utf8');
+        COURIER_PRICING = JSON.parse(pricingData);
+        console.log('✅ Цены для курьерской доставки загружены');
+        return true;
+    } catch (error) {
+        console.error('❌ Ошибка загрузки courier-pricing.json:', error.message);
+        // Fallback
+        COURIER_PRICING = {
+            currency: 'BYN',
+            delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+            weight_pricing: [
+                { max_weight: 1, price: 12.90 },
+                { max_weight: 2, price: 14.70 },
+                { max_weight: 3, price: 16.40 },
+                { max_weight: 5, price: 18.20 },
+                { max_weight: 10, price: 21.60 },
+                { max_weight: 20, price: 28.90 },
+                { max_weight: 50, price: 42.80 }
+            ]
+        };
+        return false;
+    }
+}
+
+// Цены для ПВЗ
+let PICKUP_PRICING = {};
+function loadPickupPricing() {
+    try {
+        const pricingPath = path.join(__dirname, 'pickup-pricing.json');
+        const pricingData = fs.readFileSync(pricingPath, 'utf8');
+        PICKUP_PRICING = JSON.parse(pricingData);
+        console.log('✅ Цены для ПВЗ загружены');
+        return true;
+    } catch (error) {
+        console.error('❌ Ошибка загрузки pickup-pricing.json:', error.message);
+        // Fallback
+        PICKUP_PRICING = {
+            currency: 'BYN',
+            delivery_days: { min: 1, max: 2, description: '1-2 дня' },
+            weight_pricing: [
+                { max_weight: 1, price: 5.0 },
+                { max_weight: 3, price: 7.0 },
+                { max_weight: 5, price: 10.0 },
+                { max_weight: 10, price: 15.0 },
+                { max_weight: 20, price: 25.0 },
+                { max_weight: 50, price: 40.0 }
+            ]
+        };
+        return false;
+    }
+}
+
+// Перезагрузка всех цен
+function reloadAllPricing() {
+    console.log('🔄 Перезагрузка всех цен...');
+    const courierOk = loadCourierPricing();
+    const pickupOk = loadPickupPricing();
+    return { courier: courierOk, pickup: pickupOk };
+}
+
+// Данные о пунктах выдачи
 const PICKUP_POINTS_DATA = [
     {
         id: 1,
@@ -112,63 +165,159 @@ const PICKUP_POINTS_DATA = [
     }
 ];
 
-// Функция расчета стоимости доставки по весу
-function calculateDeliveryPrice(totalWeight) {
+// === ФУНКЦИИ РАСЧЕТА СТОИМОСТИ ===
+
+// Расчет стоимости доставки в ПВЗ
+function calculatePickupPrice(totalWeight) {
     const weight = totalWeight || 0;
+    const pricing = PICKUP_PRICING;
     
-    for (let step of WEIGHT_PRICING.weight_steps) {
+    if (!pricing || !pricing.weight_pricing) {
+        return 0;
+    }
+    
+    for (let step of pricing.weight_pricing) {
         if (weight <= step.max_weight) {
             return step.price;
         }
     }
     
-    // Для веса больше максимального - фиксированная цена
-    return WEIGHT_PRICING.weight_steps[WEIGHT_PRICING.weight_steps.length - 1].price + 
-           Math.ceil((weight - WEIGHT_PRICING.weight_steps[WEIGHT_PRICING.weight_steps.length - 1].max_weight) / 5) * 5;
-}
-
-// Расчет времени доставки
-function calculateDeliveryDays(city) {
-    const baseDeliveryDays = 2; // базовое время доставки в днях
-    
-    // Сокращение времени для крупных городов
-    if (['Минск', 'Брест', 'Гомель'].includes(city)) {
-        return { min_days: 1, max_days: 2 };
+    // Для веса больше максимального
+    if (pricing.oversized_pricing) {
+        const lastStep = pricing.weight_pricing[pricing.weight_pricing.length - 1];
+        const extraKg = weight - lastStep.max_weight;
+        return pricing.oversized_pricing.base_price + (extraKg * pricing.oversized_pricing.price_per_kg);
     }
     
-    return { min_days: baseDeliveryDays, max_days: baseDeliveryDays + 1 };
+    const lastStep = pricing.weight_pricing[pricing.weight_pricing.length - 1];
+    return lastStep.price + Math.ceil((weight - lastStep.max_weight) / 5) * 5;
 }
 
-// POST /api/delivery/calculate - расчет стоимости доставки (для курьерской доставки)
+// Расчет стоимости курьерской доставки
+function calculateCourierPrice(totalWeight) {
+    const weight = totalWeight || 0;
+    const pricing = COURIER_PRICING;
+    
+    if (!pricing || !pricing.weight_pricing) {
+        return { price: 0, currency: 'BYN' };
+    }
+    
+    for (let step of pricing.weight_pricing) {
+        if (weight <= step.max_weight) {
+            return {
+                price: step.price,
+                currency: pricing.currency || 'BYN'
+            };
+        }
+    }
+    
+    // Для веса больше максимального
+    if (pricing.oversized_pricing) {
+        const lastStep = pricing.weight_pricing[pricing.weight_pricing.length - 1];
+        const extraKg = weight - lastStep.max_weight;
+        const price = pricing.oversized_pricing.base_price + (extraKg * pricing.oversized_pricing.price_per_kg);
+        return {
+            price: Math.round(price * 100) / 100,
+            currency: pricing.currency || 'BYN'
+        };
+    }
+    
+    const lastStep = pricing.weight_pricing[pricing.weight_pricing.length - 1];
+    const price = lastStep.price + Math.ceil((weight - lastStep.max_weight) / 5) * 3;
+    return {
+        price: Math.round(price * 100) / 100,
+        currency: pricing.currency || 'BYN'
+    };
+}
+
+// === API ENDPOINTS ===
+
+// POST /api/courier/calculate - простой расчет курьерской доставки
+app.post('/api/courier/calculate', (req, res) => {
+    try {
+        const { weight } = req.body;
+        
+        if (weight === undefined || weight === null) {
+            return res.status(400).json({
+                error: 'Не указан вес (weight)'
+            });
+        }
+
+        const totalWeight = parseFloat(weight) || 0;
+        const calculation = calculateCourierPrice(totalWeight);
+
+        res.json({
+            price: calculation.price,
+            currency: calculation.currency,
+            weight: totalWeight,
+            delivery_days: COURIER_PRICING.delivery_days
+        });
+    } catch (error) {
+        console.error('Ошибка расчета курьерской доставки:', error);
+        res.status(500).json({
+            error: 'Ошибка сервера при расчете доставки'
+        });
+    }
+});
+
+// POST /api/pickup/calculate - расчет стоимости доставки в ПВЗ
+app.post('/api/pickup/calculate', (req, res) => {
+    try {
+        const { weight } = req.body;
+        
+        if (weight === undefined || weight === null) {
+            return res.status(400).json({
+                error: 'Не указан вес (weight)'
+            });
+        }
+
+        const totalWeight = parseFloat(weight) || 0;
+        const price = calculatePickupPrice(totalWeight);
+
+        res.json({
+            price: price,
+            currency: PICKUP_PRICING.currency || 'BYN',
+            weight: totalWeight,
+            delivery_days: PICKUP_PRICING.delivery_days
+        });
+    } catch (error) {
+        console.error('Ошибка расчета доставки в ПВЗ:', error);
+        res.status(500).json({
+            error: 'Ошибка сервера при расчете доставки'
+        });
+    }
+});
+
+// POST /api/delivery/calculate - расчет курьерской доставки (InSales формат)
 app.post('/api/delivery/calculate', (req, res) => {
     try {
-        const { order, address } = req.body;
+        const { order } = req.body;
         
-        // Валидация входных данных
-        if (!order || !address) {
+        if (!order) {
             return res.status(400).json({
-                errors: ['Отсутствуют данные заказа или адреса']
+                errors: ['Отсутствуют данные заказа']
             });
         }
 
         const totalWeight = order.total_weight || 0;
-        const price = calculateDeliveryPrice(totalWeight);
-        const deliveryDays = calculateDeliveryDays(address.city || address.full_locality_name);
+        const calculation = calculateCourierPrice(totalWeight);
 
         const response = [{
-            price: price,
-            delivery_interval: deliveryDays,
-            shipping_company_handle: 'autolight_express',
-            title: 'Автолайт Экспресс',
-            description: `Доставка в ${address.city || address.full_locality_name}`,
-            tariff_id: 'standard_delivery',
+            price: calculation.price,
+            currency: calculation.currency,
+            delivery_days: COURIER_PRICING.delivery_days,
+            shipping_company_handle: 'autolight_express_courier',
+            title: 'Автолайт Экспресс (Курьер)',
+            description: 'Доставка курьером на адрес',
+            tariff_id: 'courier_delivery',
+            delivery_type: 'courier',
             fields_values: [],
             warnings: []
         }];
 
         res.json(response);
     } catch (error) {
-        console.error('Ошибка расчета доставки:', error);
+        console.error('Ошибка расчета курьерской доставки:', error);
         res.status(500).json({
             errors: ['Ошибка сервера при расчете доставки']
         });
@@ -180,7 +329,6 @@ app.post('/api/pickup-points', (req, res) => {
     try {
         const { order, address } = req.body;
         
-        // Фильтрация по городам (если указан город в адресе)
         let filteredPoints = PICKUP_POINTS_DATA;
         
         if (address && address.city) {
@@ -190,11 +338,9 @@ app.post('/api/pickup-points', (req, res) => {
             );
         }
 
-        // Преобразование в формат InSales
         const response = filteredPoints.map(point => {
             const totalWeight = order?.total_weight || 0;
-            const price = calculateDeliveryPrice(totalWeight);
-            const deliveryDays = calculateDeliveryDays(point.city);
+            const price = calculatePickupPrice(totalWeight);
 
             return {
                 id: point.id,
@@ -207,14 +353,14 @@ app.post('/api/pickup-points', (req, res) => {
                 address: point.address,
                 description: `${point.city} - ${point.title}`,
                 phones: [point.phone],
-                delivery_interval: deliveryDays,
+                delivery_interval: PICKUP_PRICING.delivery_days,
                 fields_values: [],
                 payment_method: ['CASH', 'CARD', 'PREPAID'],
                 tariffs: [{
                     id: 'standard_pickup',
                     price: price,
                     title: 'Стандартная доставка',
-                    delivery_interval: deliveryDays,
+                    delivery_interval: PICKUP_PRICING.delivery_days,
                     fields_values: []
                 }]
             };
@@ -249,12 +395,11 @@ app.post('/api/pickup-point/calculate', (req, res) => {
         }
 
         const totalWeight = order?.total_weight || 0;
-        const price = calculateDeliveryPrice(totalWeight);
-        const deliveryDays = calculateDeliveryDays(point.city);
+        const price = calculatePickupPrice(totalWeight);
 
         const response = {
             price: price,
-            delivery_interval: deliveryDays,
+            delivery_days: PICKUP_PRICING.delivery_days,
             shipping_company_handle: point.shipping_company_handle,
             title: point.title,
             description: `${point.city} - ${point.title}`,
@@ -279,14 +424,50 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'OK',
         service: 'Delivery API Service',
-        version: '1.0.0',
+        version: '1.3.0',
         timestamp: new Date().toISOString(),
         pickup_points_count: PICKUP_POINTS_DATA.length,
-        weight_pricing: WEIGHT_PRICING
+        pricing: {
+            courier_loaded: !!COURIER_PRICING.weight_pricing,
+            courier_grades: COURIER_PRICING.weight_pricing?.length || 0,
+            pickup_loaded: !!PICKUP_PRICING.weight_pricing,
+            pickup_grades: PICKUP_PRICING.weight_pricing?.length || 0
+        }
     });
 });
 
-// GET /pickup-points - тестовый endpoint для получения всех пунктов выдачи
+// POST /admin/reload-pricing - перезагрузка цен без перезапуска
+app.post('/admin/reload-pricing', (req, res) => {
+    const result = reloadAllPricing();
+    res.json({
+        success: result.courier && result.pickup,
+        message: 'Цены перезагружены',
+        timestamp: new Date().toISOString(),
+        result: result
+    });
+});
+
+// GET /pricing - просмотр текущих цен
+app.get('/pricing', (req, res) => {
+    res.json({
+        courier: {
+            file: 'courier-pricing.json',
+            currency: COURIER_PRICING.currency,
+            delivery_days: COURIER_PRICING.delivery_days,
+            weight_pricing: COURIER_PRICING.weight_pricing,
+            oversized_pricing: COURIER_PRICING.oversized_pricing
+        },
+        pickup: {
+            file: 'pickup-pricing.json',
+            currency: PICKUP_PRICING.currency,
+            delivery_days: PICKUP_PRICING.delivery_days,
+            weight_pricing: PICKUP_PRICING.weight_pricing,
+            oversized_pricing: PICKUP_PRICING.oversized_pricing
+        }
+    });
+});
+
+// GET /pickup-points - тестовый endpoint
 app.get('/pickup-points', (req, res) => {
     res.json({
         points: PICKUP_POINTS_DATA,
@@ -298,15 +479,18 @@ app.get('/pickup-points', (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         service: 'External Delivery API Service for InSales',
-        version: '1.0.0',
+        version: '1.3.0',
         endpoints: {
-            'POST /api/delivery/calculate': 'Расчет стоимости курьерской доставки',
-            'POST /api/pickup-points': 'Получение списка пунктов выдачи',
-            'POST /api/pickup-point/calculate': 'Расчет стоимости для пункта выдачи',
-            'GET /health': 'Проверка состояния сервиса',
-            'GET /pickup-points': 'Все пункты выдачи (для тестирования)'
+            'POST /api/courier/calculate': 'Расчет курьерской доставки (только вес)',
+            'POST /api/pickup/calculate': 'Расчет доставки в ПВЗ (только вес)',
+            'POST /api/delivery/calculate': 'Курьерская доставка (InSales формат)',
+            'POST /api/pickup-points': 'Список ПВЗ',
+            'POST /api/pickup-point/calculate': 'Расчет для конкретного ПВЗ',
+            'GET /health': 'Проверка состояния',
+            'GET /pricing': 'Текущие цены',
+            'POST /admin/reload-pricing': 'Перезагрузка цен'
         },
-        weight_pricing: WEIGHT_PRICING
+        pricing_files: ['courier-pricing.json', 'pickup-pricing.json']
     });
 });
 
@@ -315,12 +499,13 @@ app.use('*', (req, res) => {
     res.status(404).json({
         error: 'Endpoint не найден',
         available_endpoints: [
+            'POST /api/courier/calculate',
+            'POST /api/pickup/calculate',
             'POST /api/delivery/calculate',
             'POST /api/pickup-points',
-            'POST /api/pickup-point/calculate',
             'GET /health',
-            'GET /pickup-points',
-            'GET /'
+            'GET /pricing',
+            'POST /admin/reload-pricing'
         ]
     });
 });
@@ -334,12 +519,16 @@ app.use((error, req, res, next) => {
     });
 });
 
+// Загрузка цен при старте
+loadCourierPricing();
+loadPickupPricing();
+
 // Запуск сервера
 app.listen(CONFIG.PORT, () => {
     console.log(`🚀 Delivery API Service запущен на порту ${CONFIG.PORT}`);
     console.log(`📡 Тестовый URL: http://localhost:${CONFIG.PORT}`);
     console.log(`🏥 Health check: http://localhost:${CONFIG.PORT}/health`);
-    console.log(`📍 Pickup points: http://localhost:${CONFIG.PORT}/pickup-points`);
+    console.log(`💰 Pricing info: http://localhost:${CONFIG.PORT}/pricing`);
 });
 
 // Graceful shutdown
