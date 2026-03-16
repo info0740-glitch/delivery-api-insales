@@ -19,6 +19,49 @@ try {
   }
 }
 
+// Загрузка тарифов курьерской доставки из JSON
+function loadCourierPricing() {
+  try {
+    const filePath = path.join(__dirname, 'courier-pricing.json');
+    const data = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(data);
+  } catch (e) {
+    console.warn('Не удалось загрузить courier-pricing.json, используются дефолтные тарифы:', e.message);
+    return null;
+  }
+}
+
+// Расчет стоимости курьерской доставки по весу
+function calculateCourierPrice(weight) {
+  const pricing = loadCourierPricing();
+  if (pricing && pricing.weight_pricing && pricing.weight_pricing.length > 0) {
+    const weightKg = parseFloat(weight) || 0;
+    for (const tier of pricing.weight_pricing) {
+      if (weightKg <= tier.max_weight) {
+        return { price: tier.price, currency: pricing.currency || 'BYN', pricing };
+      }
+    }
+    // Свыше максимального значения таблицы — oversized
+    if (pricing.oversized_pricing) {
+      const maxTier = pricing.weight_pricing[pricing.weight_pricing.length - 1];
+      const extra = Math.max(0, weightKg - maxTier.max_weight);
+      const price = pricing.oversized_pricing.base_price + extra * pricing.oversized_pricing.price_per_kg;
+      return { price: Math.round(price * 100) / 100, currency: pricing.currency || 'BYN', pricing };
+    }
+  }
+  // Дефолтные тарифы (fallback)
+  const w = parseFloat(weight) || 0;
+  if (w <= 1) return { price: 13, currency: 'BYN', pricing: null };
+  if (w <= 2) return { price: 14, currency: 'BYN', pricing: null };
+  if (w <= 3) return { price: 17, currency: 'BYN', pricing: null };
+  if (w <= 5) return { price: 19, currency: 'BYN', pricing: null };
+  if (w <= 10) return { price: 22, currency: 'BYN', pricing: null };
+  if (w <= 20) return { price: 29, currency: 'BYN', pricing: null };
+  if (w <= 30) return { price: 34, currency: 'BYN', pricing: null };
+  if (w <= 50) return { price: 43, currency: 'BYN', pricing: null };
+  return { price: 43 + Math.ceil((w - 50)) * 1, currency: 'BYN', pricing: null };
+}
+
 // Улучшенная функция фильтрации городов
 function findBestCityMatch(inputCity, pickupPoints) {
   if (!inputCity || !inputCity.trim()) {
@@ -104,18 +147,99 @@ function calculatePrice(weight) {
   return 200.0; // Для веса свыше 250 кг
 }
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
+  'Content-Type': 'application/json'
+};
+
 exports.handler = async (event, context) => {
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-        'Content-Type': 'application/json'
-      },
-      body: ''
-    };
+    return { statusCode: 200, headers: CORS_HEADERS, body: '' };
+  }
+
+  const requestPath = event.path || '';
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // МАРШРУТ: /api/courier/calculate — расчёт стоимости курьерской доставки
+  // Вызывается виджетом на странице товара
+  // ──────────────────────────────────────────────────────────────────────────
+  if (requestPath.includes('/courier/calculate') || requestPath.includes('/courier')) {
+    try {
+      let weight = 0;
+      if (event.body) {
+        const body = JSON.parse(event.body);
+        weight = parseFloat(body.weight || body.total_weight || 0) || 0;
+      }
+      if (weight <= 0) weight = 0.5; // минимальный вес по умолчанию
+
+      const { price, currency, pricing } = calculateCourierPrice(weight);
+      const deliveryDays = (pricing && pricing.delivery_days) || { min: 1, max: 2, description: '1-2 дня' };
+
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({
+          price,
+          currency,
+          weight,
+          delivery_days: deliveryDays,
+          delivery_type: 'courier'
+        })
+      };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: err.message })
+      };
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // МАРШРУТ: /api/pickup-points — список ПВЗ по городу
+  // Вызывается виджетом на странице товара
+  // ──────────────────────────────────────────────────────────────────────────
+  if (requestPath.includes('/pickup-points')) {
+    try {
+      let city = '';
+      let weight = 0;
+      if (event.body) {
+        const body = JSON.parse(event.body);
+        city = body.address?.city || body.city || '';
+        weight = parseFloat((body.order && body.order.total_weight) || body.weight || 0) || 0;
+      }
+      if (weight <= 0) weight = 0.5;
+
+      const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
+      const price = calculatePrice(weight);
+
+      const result = points.map(point => ({
+        id: point.id,
+        title: point.name,
+        address: point.address,
+        price,
+        currency: 'BYN',
+        working_hours: point.working_hours,
+        shipping_address: {
+          city: point.city,
+          address: point.address
+        }
+      }));
+
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify(result)
+      };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: err.message })
+      };
+    }
   }
 
   try {
@@ -131,12 +255,7 @@ exports.handler = async (event, context) => {
         
         return {
           statusCode: 200,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-            'Content-Type': 'application/json'
-          },
+          headers: CORS_HEADERS,
           body: JSON.stringify({
             success: true,
             message: 'InSales External Delivery API v2 - Avtolayt Express',
@@ -234,12 +353,7 @@ exports.handler = async (event, context) => {
 
         return {
           statusCode: 200,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-            'Content-Type': 'application/json'
-          },
+          headers: CORS_HEADERS,
           body: JSON.stringify(placeholderTariff)
         };
       }
@@ -349,12 +463,7 @@ exports.handler = async (event, context) => {
 
       return {
         statusCode: 200,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-          'Content-Type': 'application/json'
-        },
+        headers: CORS_HEADERS,
         body: JSON.stringify(tariffs)
       };
     }
@@ -362,12 +471,7 @@ exports.handler = async (event, context) => {
     // Если нет body или не JSON
     return {
       statusCode: 400,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-        'Content-Type': 'application/json'
-      },
+      headers: CORS_HEADERS,
       body: JSON.stringify({ 
         error: 'Invalid request format',
         errors: ['Request body must be valid JSON'],
@@ -378,12 +482,7 @@ exports.handler = async (event, context) => {
   } catch (error) {
     return {
       statusCode: 500,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-        'Content-Type': 'application/json'
-      },
+      headers: CORS_HEADERS,
       body: JSON.stringify({ 
         error: error.message,
         errors: [error.message],
