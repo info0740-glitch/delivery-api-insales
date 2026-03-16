@@ -162,25 +162,6 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Специальный эндпоинт для приложения на Python - получение всех ПВЗ
-      // Не влияет на работу сайта InSales
-      if (requestBody.action === 'getAllPickupPoints') {
-        return {
-          statusCode: 200,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            success: true,
-            pickup_points: pickupPoints,
-            count: pickupPoints.length
-          })
-        };
-      }
-
       const order = requestBody?.order || {};
 
       // Извлекаем город из разных возможных источников
