@@ -111,7 +111,7 @@ function normalizeSettlementName(raw) {
  * Логика:
  *  1. Явный сельский префикс (д., аг., пос.) → village
  *  2. Есть в zones.saturday → saturday (Пн–Сб)
- *  3. Есть в zones.district ИЛИ есть ПВЗ в базе → district (Пн–Пт)
+ *  3. Есть в zones.district → district (Пн–Пт)
  *  4. Всё остальное → village (1–2 дня, Пн–Пт)
  *
  * @returns {'saturday'|'district'|'village'}
@@ -129,10 +129,7 @@ function classifySettlement(rawName) {
   if (deliveryZones.saturday.includes(clean)) return 'saturday';
   if (deliveryZones.district.includes(clean))  return 'district';
 
-  // Дополнительная проверка: если в базе ПВЗ есть этот город — минимум district
-  const hasPickup = pickupPoints.some(p => p.city.toLowerCase() === clean);
-  if (hasPickup) return 'district';
-
+  // Всё остальное — village (деревни, агрогородки, малые населённые пункты)
   return 'village';
 }
 
@@ -696,14 +693,13 @@ exports.handler = async (event, context) => {
       if (filteredPoints.length === 0) {
         const zone = classifySettlement(city);
         const dateInfo = calcDeliveryDate(zone);
-        const price = calculatePrice(totalWeight);
 
         // Для деревень и агрогородков ПВЗ объективно не бывает —
         // даём понятное сообщение без ложной надежды
         const noPickupTariff = {
           tariff_id: 'pvz_not_available',
           shipping_company_handle: 'autolight_express',
-          price,
+          price: 0, // Цена 0 — это заглушка, а не реальная стоимость
           currency: 'BYN',
           title: 'Пункт выдачи недоступен',
           description: zone === 'village'
@@ -757,8 +753,8 @@ exports.handler = async (event, context) => {
 
           // Коротко: только название ПВЗ (адрес — в description)
           title: point.name,
-          // Адрес + расчётная дата — вместо часов работы
-          description: `${point.address} · ${pvzDateInfo.description}`,
+          // Адрес без срока доставки (срок отображается отдельным полем в интерфейсе)
+          description: point.address,
 
           delivery_interval: {
             min_days: pvzDateInfo.min_days,
