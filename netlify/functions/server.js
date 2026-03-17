@@ -545,7 +545,7 @@ exports.handler = async (event, context) => {
         price,
         currency,
         title: zoneTitles[zone],
-        description: `${zoneDescriptions[zone]}. Доставка: ${dateInfo.description}`,
+        description: zoneDescriptions[zone],
         delivery_interval: {
           min_days: dateInfo.min_days,
           max_days: dateInfo.max_days,
