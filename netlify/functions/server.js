@@ -115,9 +115,6 @@ try {
   const { zonesData } = require('./zones-data');
   deliveryZones.saturday = (zonesData.saturday || []).map(s => s.toLowerCase());
   deliveryZones.district = (zonesData.district || []).map(s => s.toLowerCase());
-  console.log(`[ZONES] ✅ Загружено из модуля zones-data`);
-  console.log(`[ZONES] Saturday: ${deliveryZones.saturday.length} городов`);
-  console.log(`[ZONES] District: ${deliveryZones.district.length} городов`);
   zonesLoadStatus = 'loaded';
 } catch (e) {
   console.warn(`[ZONES] ⚠️ Модуль zones-data недоступен, пробуем zones.json: ${e.message}`);
@@ -136,11 +133,8 @@ try {
       const parsed = JSON.parse(zonesRaw);
       deliveryZones.saturday = (parsed.saturday || []).map(s => s.toLowerCase());
       deliveryZones.district = (parsed.district || []).map(s => s.toLowerCase());
-      console.log(`[ZONES] ✅ Загружено из: ${zonesPath}`);
-      console.log(`[ZONES] Saturday: ${deliveryZones.saturday.length} городов`);
-      console.log(`[ZONES] District: ${deliveryZones.district.length} городов`);
-      loaded = true;
       zonesLoadStatus = 'loaded';
+      loaded = true;
       break;
     } catch (pathErr) {
       // Пробуем следующий путь
@@ -148,14 +142,16 @@ try {
   }
 
   if (!loaded) {
-    console.error('[ZONES] ❌ zones.json не найден ни по одному из путей, используем DEFAULT_ZONES');
     deliveryZones.saturday = [...DEFAULT_ZONES.saturday];
     deliveryZones.district = [...DEFAULT_ZONES.district];
-    console.log(`[ZONES] Saturday (fallback): ${deliveryZones.saturday.length} городов`);
-    console.log(`[ZONES] District (fallback): ${deliveryZones.district.length} городов`);
     zonesLoadStatus = 'fallback';
   }
 }
+
+// Логируем результат загрузки один раз
+console.log(`[ZONES] ✅ Загружено из ${zonesLoadStatus === 'loaded' ? 'модуля/файла' : 'DEFAULT_ZONES (fallback)'}`);
+console.log(`[ZONES] Saturday: ${deliveryZones.saturday.length} городов`);
+console.log(`[ZONES] District: ${deliveryZones.district.length} городов`);
 
 // Префиксы, однозначно указывающие на сельский тип населённого пункта
 // Поддерживаем варианты с точкой («д.») и без точки («д ») — InSales присылает оба формата
@@ -242,57 +238,24 @@ function formatDate(date) {
 }
 
 /**
- * Генерирует SVG-календарь для визуализации сроков доставки.
- * Компактный дизайн с иконкой календаря и датами.
+ * Генерирует простой текстовый вывод для визуализации сроков доставки с эмодзи.
+ * Вместо SVG используем эмодзи (!), которое видно везде.
  */
 function generateDeliverySvg(dateInfo) {
-  const isRange = dateInfo.min_days !== dateInfo.max_days || dateInfo.description.includes('–');
-  
   // Парсим даты из description
   const dateParts = dateInfo.description.split(' – ');
   const startDate = dateParts[0] || dateInfo.description;
   const endDate = dateParts[1] || null;
   
-  // Базовые размеры
-  const width = isRange && endDate ? 280 : 200;
-  const height = 48;
+  // Проверяем, есть ли реальный диапазон (разные даты)
+  const isRange = endDate && startDate !== endDate;
   
-  // SVG шаблон
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
-  
-  // Фон с закруглением
-  svg += `<rect width="${width}" height="${height}" rx="8" fill="#E8F5E9" stroke="#4CAF50" stroke-width="1.5"/>`;
-  
-  // Иконка календаря (слева)
-  svg += `<g transform="translate(10, 10)">
-    <rect x="0" y="4" width="24" height="20" rx="3" fill="white" stroke="#4CAF50" stroke-width="1.5"/>
-    <line x1="4" y1="10" x2="20" y2="10" stroke="#4CAF50" stroke-width="1.5"/>
-    <line x1="8" y1="0" x2="8" y2="6" stroke="#4CAF50" stroke-width="2" stroke-linecap="round"/>
-    <line x1="16" y1="0" x2="16" y2="6" stroke="#4CAF50" stroke-width="2" stroke-linecap="round"/>
-    <circle cx="8" cy="18" r="1.5" fill="#4CAF50"/>
-    <circle cx="16" cy="18" r="1.5" fill="#4CAF50"/>
-  </g>`;
-  
-  // Текст с датами
-  const textX = 42;
-  const textY = 20;
-  
-  if (isRange && endDate) {
-    // Две даты с тире между ними
-    svg += `<text x="${textX}" y="${textY}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2E7D32">${startDate}</text>`;
-    svg += `<text x="${textX + 110}" y="${textY}" font-family="Arial, sans-serif" font-size="18" font-weight="300" fill="#4CAF50">–</text>`;
-    svg += `<text x="${textX + 130}" y="${textY}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2E7D32">${endDate}</text>`;
+  // Возвращаем простой текст с эмодзи вместо SVG
+  if (isRange) {
+    return `❗ ${startDate} – ${endDate}`;
   } else {
-    // Одна дата
-    svg += `<text x="${textX}" y="${textY}" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#2E7D32">${startDate}</text>`;
+    return `❗ ${startDate}`;
   }
-  
-  // Подпись "доставка" внизу
-  svg += `<text x="${textX}" y="${textY + 16}" font-family="Arial, sans-serif" font-size="11" fill="#66BB6A">доставка</text>`;
-  
-  svg += `</svg>`;
-  
-  return svg;
 }
 
 /**
@@ -878,50 +841,18 @@ exports.handler = async (event, context) => {
 
       console.log(`[API] Найдено ПВЗ в городе "${city}": ${filteredPoints.length}`);
 
-       // Если ПВЗ в указанном городе нет — возвращаем тариф «недоступно»
+       // Если ПВЗ в указанном городе нет — не показываем этот способ доставки (пустой массив)
        if (filteredPoints.length === 0) {
          const zone = classifySettlement(city);
-         // utcOffset уже определён выше, просто переиспользуем
-         const dateInfo = calcDeliveryDate(zone, utcOffset);
+         console.log(`[API] ПВЗ нет в городе "${city}", зона: ${zone} — способ доставки ПВЗ скрыт`);
 
-         console.log(`[API] ПВЗ нет, зона: ${zone}, доставка: ${dateInfo.description}`);
-
-        // Для деревень и агрогородков ПВЗ объективно не бывает —
-        // даём понятное сообщение без ложной надежды
-        const noPickupTariff = {
-          tariff_id: 'pvz_not_available',
-          shipping_company_handle: 'autolight_express',
-          price: 0, // Цена 0 — это заглушка, а не реальная стоимость
-          currency: 'BYN',
-          title: 'Пункт выдачи недоступен',
-          description: zone === 'village'
-            ? `В деревни и агрогородки доставляем только курьером (1–2 дня). Выберите способ «Курьер до двери».`
-            : `В населённом пункте «${city}» нет пунктов выдачи. Выберите доставку курьером.`,
-          delivery_interval: {
-            min_days: dateInfo.min_days,
-            max_days: dateInfo.max_days,
-            description: dateInfo.description
-          },
-          shipping_address: {
-            full_locality_name: city,
-            address: '',
-            city,
-            country: 'Беларусь'
-          },
-          fields_values: [
-            { handle: 'shipping_address[full_locality_name]', value: city },
-            { handle: 'shipping_address[address]', value: '' },
-            { handle: 'city', value: city },
-            { handle: 'country', value: 'Беларусь' }
-          ]
-        };
-
-        return {
-          statusCode: 200,
-          headers: CORS_HEADERS,
-          body: JSON.stringify([noPickupTariff])
-        };
-      }
+         // Возвращаем пустой массив — способ доставки не будет отображаться клиенту
+         return {
+           statusCode: 200,
+           headers: CORS_HEADERS,
+           body: JSON.stringify([])
+         };
+       }
 
        // ПВЗ найдены — определяем зону для расчёта даты
        // ПВЗ есть только в городах → zone всегда district или minsk_oblast
