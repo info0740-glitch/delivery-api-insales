@@ -165,6 +165,77 @@ const PICKUP_POINTS_DATA = [
     }
 ];
 
+// === ФУНКЦИИ РАСЧЕТА ДАТЫ ДОСТАВКИ ===
+
+/**
+ * Расчет даты доставки на основе времени клиента
+ * - До 12:00 (по времени пользователя): доставка на следующий день
+ * - После 12:00 (по времени пользователя): доставка через день
+ * - Исключаются субботы и воскресенья для деревень и районных городов
+ * @param {number} clientHour - Час клиента (0-23)
+ * @param {string} deliveryType - Тип доставки (courier, pickup)
+ * @param {boolean} isSmallCity - Маленький город/деревня (default true)
+ * @returns {object} { date: Date, deliveryDays: number, formattedDate: string }
+ */
+function calculateDeliveryDate(clientHour = new Date().getHours(), deliveryType = 'courier', isSmallCity = true) {
+    const now = new Date();
+    let deliveryDate = new Date(now);
+    let deliveryDays = 1;
+
+    // Определяем базовое количество дней доставки
+    if (clientHour >= 12) {
+        // После полудня - доставка через день
+        deliveryDate.setDate(deliveryDate.getDate() + 2);
+        deliveryDays = 2;
+    } else {
+        // До полудня - доставка на следующий день
+        deliveryDate.setDate(deliveryDate.getDate() + 1);
+        deliveryDays = 1;
+    }
+
+    // Для маленьких городов и деревень исключаем субботы и воскресенья
+    if (isSmallCity) {
+        while (deliveryDate.getDay() === 6 || deliveryDate.getDay() === 0) {
+            deliveryDate.setDate(deliveryDate.getDate() + 1);
+            deliveryDays++;
+        }
+    }
+
+    return {
+        date: deliveryDate,
+        deliveryDays: deliveryDays,
+        formattedDate: formatDate(deliveryDate),
+        isoDate: deliveryDate.toISOString().split('T')[0]
+    };
+}
+
+/**
+ * Форматирование даты для отображения
+ * @param {Date} date - Дата для форматирования
+ * @returns {string} Отформатированная дата (например: "21 марта, понедельник")
+ */
+function formatDate(date) {
+    const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+    const weekdays = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+    
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const weekday = weekdays[date.getDay()];
+    
+    return `${day} ${month}, ${weekday}`;
+}
+
+/**
+ * Определение маленького города по названию
+ * @param {string} city - Название города
+ * @returns {boolean} true если город маленький, false если крупный
+ */
+function isSmallCityOrVillage(city) {
+    const largeCities = ['Минск', 'Брест', 'Витебск', 'Гомель', 'Гродно', 'Могилёв', 'Полоцк', 'Новополоцк', 'Борисов', 'Бобруйск', 'Орша', 'Жодино'];
+    return !largeCities.some(largeCity => city.toLowerCase().includes(largeCity.toLowerCase()));
+}
+
 // === ФУНКЦИИ РАСЧЕТА СТОИМОСТИ ===
 
 // Расчет стоимости доставки в ПВЗ
@@ -291,7 +362,7 @@ app.post('/api/pickup/calculate', (req, res) => {
 // POST /api/delivery/calculate - расчет курьерской доставки (InSales формат)
 app.post('/api/delivery/calculate', (req, res) => {
     try {
-        const { order } = req.body;
+        const { order, clientHour } = req.body;
         
         if (!order) {
             return res.status(400).json({
@@ -301,14 +372,24 @@ app.post('/api/delivery/calculate', (req, res) => {
 
         const totalWeight = order.total_weight || 0;
         const calculation = calculateCourierPrice(totalWeight);
+        
+        // Получаем город для определения типа населённого пункта
+        const city = order.shipping_address?.city || '';
+        const isSmall = isSmallCityOrVillage(city);
+        
+        // Рассчитываем дату доставки
+        const deliveryInfo = calculateDeliveryDate(clientHour, 'courier', isSmall);
 
         const response = [{
             price: calculation.price,
             currency: calculation.currency,
             delivery_days: COURIER_PRICING.delivery_days,
+            delivery_date: deliveryInfo.isoDate,
+            delivery_date_formatted: deliveryInfo.formattedDate,
+            estimated_delivery_days: deliveryInfo.deliveryDays,
             shipping_company_handle: 'autolight_express_courier',
             title: 'Автолайт Экспресс (Курьер)',
-            description: 'Доставка курьером на адрес',
+            description: `Доставка курьером на адрес. Предполагаемая дата доставки: ${deliveryInfo.formattedDate}`,
             tariff_id: 'courier_delivery',
             delivery_type: 'courier',
             fields_values: [],
@@ -327,7 +408,7 @@ app.post('/api/delivery/calculate', (req, res) => {
 // POST /api/pickup-points - получение списка пунктов выдачи
 app.post('/api/pickup-points', (req, res) => {
     try {
-        const { order, address } = req.body;
+        const { order, address, clientHour } = req.body;
         
         let filteredPoints = PICKUP_POINTS_DATA;
         
@@ -337,6 +418,9 @@ app.post('/api/pickup-points', (req, res) => {
                 address.city.toLowerCase().includes(point.city.toLowerCase())
             );
         }
+        
+        // Рассчитываем дату доставки
+        const deliveryInfo = calculateDeliveryDate(clientHour, 'pickup', true);
 
         const response = filteredPoints.map(point => {
             const totalWeight = order?.total_weight || 0;
@@ -348,10 +432,14 @@ app.post('/api/pickup-points', (req, res) => {
                 longitude: point.longitude,
                 shipping_company_handle: point.shipping_company_handle,
                 price: price,
+                currency: PICKUP_PRICING.currency || 'BYN',
                 title: point.title,
                 type: point.type,
                 address: point.address,
-                description: `${point.city} - ${point.title}`,
+                description: `${point.city} - ${point.title}. Предполагаемая дата доставки: ${deliveryInfo.formattedDate}`,
+                delivery_date: deliveryInfo.isoDate,
+                delivery_date_formatted: deliveryInfo.formattedDate,
+                estimated_delivery_days: deliveryInfo.deliveryDays,
                 phones: [point.phone],
                 delivery_interval: PICKUP_PRICING.delivery_days,
                 fields_values: [],
@@ -361,6 +449,9 @@ app.post('/api/pickup-points', (req, res) => {
                     price: price,
                     title: 'Стандартная доставка',
                     delivery_interval: PICKUP_PRICING.delivery_days,
+                    delivery_date: deliveryInfo.isoDate,
+                    delivery_date_formatted: deliveryInfo.formattedDate,
+                    estimated_delivery_days: deliveryInfo.deliveryDays,
                     fields_values: []
                 }]
             };
@@ -378,7 +469,7 @@ app.post('/api/pickup-points', (req, res) => {
 // POST /api/pickup-point/calculate - расчет стоимости для выбранного пункта
 app.post('/api/pickup-point/calculate', (req, res) => {
     try {
-        const { point_id, order } = req.body;
+        const { point_id, order, clientHour } = req.body;
         
         if (!point_id) {
             return res.status(400).json({
@@ -396,13 +487,20 @@ app.post('/api/pickup-point/calculate', (req, res) => {
 
         const totalWeight = order?.total_weight || 0;
         const price = calculatePickupPrice(totalWeight);
+        
+        // Рассчитываем дату доставки (для ПВЗ всегда исключаем выходные)
+        const deliveryInfo = calculateDeliveryDate(clientHour, 'pickup', true);
 
         const response = {
             price: price,
+            currency: PICKUP_PRICING.currency || 'BYN',
             delivery_days: PICKUP_PRICING.delivery_days,
+            delivery_date: deliveryInfo.isoDate,
+            delivery_date_formatted: deliveryInfo.formattedDate,
+            estimated_delivery_days: deliveryInfo.deliveryDays,
             shipping_company_handle: point.shipping_company_handle,
             title: point.title,
-            description: `${point.city} - ${point.title}`,
+            description: `${point.city} - ${point.title}. Предполагаемая дата доставки: ${deliveryInfo.formattedDate}`,
             address: point.address,
             working_hours: point.working_hours,
             fields_values: [],

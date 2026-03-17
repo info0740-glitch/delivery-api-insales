@@ -38,8 +38,14 @@ const API_BASE_URL = 'https://insales-delivery-api.netlify.app';
 // Получение пунктов выдачи по городу
 function getPickupPoints(city) {
   console.log('🔍 Запрашиваем ПВЗ для города:', city);
+  
+  // Получаем текущий час клиента
+  const clientHour = new Date().getHours();
+  console.log('⏰ Время клиента:', clientHour + ':00');
+  
   const requestBody = {
-    city: city || ''
+    city: city || '',
+    clientHour: clientHour
   };
 
   return fetch(API_BASE_URL + '/api/pickup-points', {
@@ -51,19 +57,25 @@ function getPickupPoints(city) {
   })
   .then(response => response.json())
   .then(data => {
-    console.log('✅ Получили ПВЗ:', data.pickup_points);
-    return data.pickup_points;
+    console.log('✅ Получили ПВЗ:', data.pickup_points || data);
+    return data.pickup_points || data;
   });
 }
 
 // Расчет стоимости доставки до выбранного ПВЗ
 function calculatePickupDelivery(orderWeight, pickupPointId) {
   console.log('🔍 Рассчитываем стоимость для ПВЗ ID:', pickupPointId, 'Вес:', orderWeight);
+  
+  // Получаем текущий час клиента
+  const clientHour = new Date().getHours();
+  console.log('⏰ Время клиента:', clientHour + ':00');
+  
   const requestBody = {
     order: {
       total_weight: orderWeight || 0
     },
-    pickup_point_id: pickupPointId
+    pickup_point_id: pickupPointId,
+    clientHour: clientHour
   };
 
   return fetch(API_BASE_URL + '/api/pickup-point/calculate', {
@@ -80,6 +92,9 @@ function calculatePickupDelivery(orderWeight, pickupPointId) {
       price: data.price,
       currency: data.currency,
       delivery_days: data.delivery_days,
+      delivery_date: data.delivery_date,
+      delivery_date_formatted: data.delivery_date_formatted,
+      estimated_delivery_days: data.estimated_delivery_days,
       description: data.description
     };
   });
@@ -135,8 +150,42 @@ function stylePickupContainer(container) {
     }
     
     .final-price {
-      background: #28a745 !important;
+      background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
       color: white !important;
+      padding: 15px !important;
+      border-radius: 6px !important;
+    }
+    
+    .delivery-date-highlight {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    
+    .delivery-date-highlight strong {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .delivery-date-value {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+    
+    .price-value-block {
+      text-align: center;
+      padding: 10px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      margin: 10px 0;
     }
     
     .price-loading, .pickup-loading {
@@ -360,19 +409,25 @@ function handlePickupPointSelection($selectedPoint, orderData) {
   // Рассчитываем стоимость
   calculatePickupDelivery(orderWeight, pointId)
     .then(result => {
-      console.log('✅ Рассчитанная стоимость:', result);
+       console.log('✅ Рассчитанная стоимость:', result);
 
-      // Обновляем цену на ПВЗ
-      $priceElement.html(`
+       // Обновляем цену и дату доставки на ПВЗ
+       const deliveryDateText = result.delivery_date_formatted || 'Рассчитывается';
+       $priceElement.html(`
         <div class="final-price">
-          <span class="price-value">${result.price} ${result.currency}</span>
+          <div class="delivery-date-highlight">
+            <strong>📅 Предполагаемая дата доставки:</strong>
+            <span class="delivery-date-value">${deliveryDateText}</span>
+          </div>
+          <div class="price-value-block">
+            <span class="price-value">${result.price} ${result.currency}</span>
+          </div>
           <div class="price-details">
             <small>${result.description}</small>
-            <small>Срок доставки: ${result.delivery_days} ${result.delivery_days === 1 ? 'день' : 'дня'}</small>
           </div>
         </div>
-      `);
-      $priceElement.addClass('final-price');
+       `);
+       $priceElement.addClass('final-price');
 
       // --- КЛЮЧЕВОЙ ШАГ: Обновляем способ доставки в InSales ---
       const deliveryDataForUpdate = {
