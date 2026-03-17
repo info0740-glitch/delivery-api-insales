@@ -26,7 +26,7 @@ const courierPricingData = {
   ],
   oversized_pricing: {
     base_price: 43.00,
-    price_per_kg: 1
+    price_per_kg: 3
   }
 };
 
