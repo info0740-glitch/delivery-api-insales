@@ -19,12 +19,23 @@ try {
   }
 }
 
-// Загрузка тарифов курьерской доставки из JSON
+// Загрузка тарифов курьерской доставки из встроенного модуля (для надёжного деплоя на Netlify)
+let _courierPricingCache = null;
 function loadCourierPricing() {
+  if (_courierPricingCache) return _courierPricingCache;
+  try {
+    const { courierPricingData } = require('./courier-pricing-data');
+    _courierPricingCache = courierPricingData;
+    return _courierPricingCache;
+  } catch (e) {
+    console.warn('Не удалось загрузить courier-pricing-data, пробуем JSON:', e.message);
+  }
+  // Fallback: пробуем загрузить из JSON файла
   try {
     const filePath = path.join(__dirname, 'courier-pricing.json');
     const data = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(data);
+    _courierPricingCache = JSON.parse(data);
+    return _courierPricingCache;
   } catch (e) {
     console.warn('Не удалось загрузить courier-pricing.json, используются дефолтные тарифы:', e.message);
     return null;
@@ -66,14 +77,14 @@ function calculateCourierPrice(weight) {
 // ЗОНИРОВАНИЕ НАСЕЛЁННЫХ ПУНКТОВ — загружается из zones.json
 // ──────────────────────────────────────────────────────────────────────────
 
-// Встроенные зоны по умолчанию (fallback на случай ошибки загрузки файла)
+// Встроенные зоны по умолчанию (fallback на случай ошибки загрузки zones-data и zones.json)
 const DEFAULT_ZONES = {
   saturday: [
     'минск', 'брест', 'витебск', 'гомель', 'гродно', 'могилев', 'могилёв',
     'барановичи', 'бобруйск', 'борисов', 'жлобин', 'жодино', 'лида',
-    'молодечно', 'мозырь', 'новополоцк', 'орша', 'осиповичи', 'пинск',
+    'молодечно', 'мозырь', 'новополоцк', 'орша', 'пинск',
     'полоцк', 'речица', 'светлогорск', 'слоним', 'слуцк', 'солигорск',
-    'сморгонь', 'калинковичи', 'кобрин'
+    'сморгонь', 'калинковичи'
   ],
   district: [
     'береза', 'берёза', 'берестовица', 'бешенковичи', 'браслав', 'брагин',
@@ -83,12 +94,12 @@ const DEFAULT_ZONES = {
     'горки', 'давид-городок', 'добруш', 'докшицы', 'дрибин', 'дрогичин',
     'дубровно', 'дятлово', 'дзержинск', 'ельск', 'жабинка', 'житкович',
     'заславль', 'зельва', 'иваново', 'ивацевичи', 'ивье', 'ивьё', 'каменец',
-    'кировск', 'климовичи', 'кличев', 'клецк', 'копыль', 'кореличи', 'корма',
+    'кобрин', 'кировск', 'климовичи', 'кличев', 'клецк', 'копыль', 'кореличи', 'корма',
     'костюковичи', 'краснополье', 'кричев', 'круглое', 'крупки', 'лельчицы',
     'лепель', 'лиозно', 'логойск', 'лоев', 'лунинец', 'любань', 'ляховичи',
     'малорита', 'марьина горка', 'микашевичи', 'миоры', 'мстиславль',
     'мядель', 'наровля', 'несвиж', 'новогрудок', 'новолукомль', 'октябрьский',
-    'ошмяны', 'петриков', 'поставы', 'пружаны', 'рогачев', 'рогачёв',
+    'осиповичи', 'ошмяны', 'петриков', 'поставы', 'пружаны', 'рогачев', 'рогачёв',
     'россоны', 'свислочь', 'сенно', 'скидель', 'смолевичи', 'столбцы',
     'столин', 'старые дороги', 'толочин', 'туров', 'узда', 'ушачи',
     'фаниполь', 'хойники', 'хотимск', 'чашники', 'червень', 'чериков',
@@ -99,8 +110,18 @@ const DEFAULT_ZONES = {
 let deliveryZones = { saturday: [], district: [] };
 let zonesLoadStatus = 'pending';
 
+// Загружаем зоны из встроенного модуля (для надёжного деплоя на Netlify)
 try {
-  // Пробуем несколько путей для совместимости с Netlify
+  const { zonesData } = require('./zones-data');
+  deliveryZones.saturday = (zonesData.saturday || []).map(s => s.toLowerCase());
+  deliveryZones.district = (zonesData.district || []).map(s => s.toLowerCase());
+  console.log(`[ZONES] ✅ Загружено из модуля zones-data`);
+  console.log(`[ZONES] Saturday: ${deliveryZones.saturday.length} городов`);
+  console.log(`[ZONES] District: ${deliveryZones.district.length} городов`);
+  zonesLoadStatus = 'loaded';
+} catch (e) {
+  console.warn(`[ZONES] ⚠️ Модуль zones-data недоступен, пробуем zones.json: ${e.message}`);
+  // Fallback: пробуем несколько путей к JSON файлу
   const possiblePaths = [
     path.join(__dirname, 'zones.json'),
     path.resolve(__dirname, 'zones.json'),
@@ -111,8 +132,8 @@ try {
   let loaded = false;
   for (const zonesPath of possiblePaths) {
     try {
-      const zonesData = fs.readFileSync(zonesPath, 'utf8');
-      const parsed = JSON.parse(zonesData);
+      const zonesRaw = fs.readFileSync(zonesPath, 'utf8');
+      const parsed = JSON.parse(zonesRaw);
       deliveryZones.saturday = (parsed.saturday || []).map(s => s.toLowerCase());
       deliveryZones.district = (parsed.district || []).map(s => s.toLowerCase());
       console.log(`[ZONES] ✅ Загружено из: ${zonesPath}`);
@@ -121,22 +142,19 @@ try {
       loaded = true;
       zonesLoadStatus = 'loaded';
       break;
-    } catch (e) {
+    } catch (pathErr) {
       // Пробуем следующий путь
     }
   }
 
   if (!loaded) {
-    throw new Error('Файл не найден ни по одному из путей');
+    console.error('[ZONES] ❌ zones.json не найден ни по одному из путей, используем DEFAULT_ZONES');
+    deliveryZones.saturday = [...DEFAULT_ZONES.saturday];
+    deliveryZones.district = [...DEFAULT_ZONES.district];
+    console.log(`[ZONES] Saturday (fallback): ${deliveryZones.saturday.length} городов`);
+    console.log(`[ZONES] District (fallback): ${deliveryZones.district.length} городов`);
+    zonesLoadStatus = 'fallback';
   }
-} catch (e) {
-  console.error(`[ZONES] ❌ Ошибка загрузки zones.json: ${e.message}`);
-  console.error('[ZONES] ⚠️ Используем встроенные зоны по умолчанию');
-  deliveryZones.saturday = [...DEFAULT_ZONES.saturday];
-  deliveryZones.district = [...DEFAULT_ZONES.district];
-  console.log(`[ZONES] Saturday (fallback): ${deliveryZones.saturday.length} городов`);
-  console.log(`[ZONES] District (fallback): ${deliveryZones.district.length} городов`);
-  zonesLoadStatus = 'fallback';
 }
 
 // Префиксы, однозначно указывающие на сельский тип населённого пункта

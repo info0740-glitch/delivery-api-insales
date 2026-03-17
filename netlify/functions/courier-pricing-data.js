@@ -1,0 +1,33 @@
+// courier-pricing-data.js — встроенный модуль для надёжного деплоя на Netlify
+// Данные синхронизированы с courier-pricing.json. При изменении тарифов — обновить и этот файл.
+
+const courierPricingData = {
+  description: "Цены для курьерской доставки (дверь-дверь)",
+  currency: "BYN",
+  delivery_days: {
+    min: 1,
+    max: 2,
+    description: "1-2 дня"
+  },
+  weight_pricing: [
+    { max_weight: 1,  price: 13 },
+    { max_weight: 2,  price: 14 },
+    { max_weight: 3,  price: 17 },
+    { max_weight: 5,  price: 19 },
+    { max_weight: 10, price: 22 },
+    { max_weight: 15, price: 26 },
+    { max_weight: 20, price: 29 },
+    { max_weight: 25, price: 32 },
+    { max_weight: 30, price: 34 },
+    { max_weight: 35, price: 36 },
+    { max_weight: 40, price: 39 },
+    { max_weight: 45, price: 41 },
+    { max_weight: 50, price: 43 }
+  ],
+  oversized_pricing: {
+    base_price: 43.00,
+    price_per_kg: 1
+  }
+};
+
+module.exports = { courierPricingData };
