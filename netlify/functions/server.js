@@ -62,7 +62,178 @@ function calculateCourierPrice(weight) {
   return { price: 43 + Math.ceil((w - 50)) * 1, currency: 'BYN', pricing: null };
 }
 
-// Улучшенная функция фильтрации городов
+// ──────────────────────────────────────────────────────────────────────────
+// ЗОНИРОВАНИЕ НАСЕЛЁННЫХ ПУНКТОВ — загружается из zones.json
+// ──────────────────────────────────────────────────────────────────────────
+
+let deliveryZones = { saturday: [], district: [] };
+try {
+  const zonesPath = path.join(__dirname, 'zones.json');
+  const zonesData = fs.readFileSync(zonesPath, 'utf8');
+  const parsed = JSON.parse(zonesData);
+  deliveryZones.saturday = (parsed.saturday || []).map(s => s.toLowerCase());
+  deliveryZones.district  = (parsed.district  || []).map(s => s.toLowerCase());
+} catch (e) {
+  console.error('Ошибка загрузки zones.json:', e.message);
+}
+
+// Префиксы, однозначно указывающие на сельский тип населённого пункта
+const VILLAGE_PREFIXES = /^(д\.|дер\.|деревня|аг\.|агрогородок|пос\.|поселок|хутор|х\.)\s+/i;
+
+/**
+ * Нормализует название населённого пункта для сравнения:
+ * убирает префиксы «г.», «город», «д.», «аг.», «пос.» и суффиксы «обл.», «р-н» и т.п.
+ * Важно: удаляем только однобуквенные аббревиатуры С ТОЧКОЙ или СЛОВАМИ, не просто буквы.
+ */
+function normalizeSettlementName(raw) {
+  return raw.toLowerCase()
+    .replace(/^г\.\s*/i, '')           // «г.» с точкой
+    .replace(/^город\s+/i, '')         // «город »
+    .replace(/^д\.\s*/i, '')           // «д.» деревня
+    .replace(/^дер\.\s*/i, '')         // «дер.»
+    .replace(/^деревня\s+/i, '')       // «деревня »
+    .replace(/^аг\.\s*/i, '')          // «аг.» агрогородок
+    .replace(/^агрогородок\s+/i, '')   // «агрогородок »
+    .replace(/^пос\.\s*/i, '')         // «пос.» поселок
+    .replace(/^поселок\s+/i, '')       // «поселок »
+    .replace(/^с\.\s*/i, '')           // «с.» с точкой (не «с» без точки!)
+    .replace(/^х\.\s*/i, '')           // «х.» хутор
+    .replace(/\s+беларусь$/i, '')      // «беларусь» в конце
+    .replace(/[,;].*$/, '')            // всё после запятой/точки с запятой
+    .replace(/\s+обл\.?(\s|$)/i, ' ') // «обл.»
+    .replace(/\s+р-н\.?(\s|$)/i, ' ') // «р-н»
+    .trim();
+}
+
+/**
+ * Классифицирует населённый пункт по зонам доставки.
+ *
+ * Логика:
+ *  1. Явный сельский префикс (д., аг., пос.) → village
+ *  2. Есть в zones.saturday → saturday (Пн–Сб)
+ *  3. Есть в zones.district ИЛИ есть ПВЗ в базе → district (Пн–Пт)
+ *  4. Всё остальное → village (1–2 дня, Пн–Пт)
+ *
+ * @returns {'saturday'|'district'|'village'}
+ */
+function classifySettlement(rawName) {
+  if (!rawName || !rawName.trim()) return 'district';
+
+  const raw = rawName.trim();
+
+  // Явный сельский тип — сразу village
+  if (VILLAGE_PREFIXES.test(raw)) return 'village';
+
+  const clean = normalizeSettlementName(raw);
+
+  if (deliveryZones.saturday.includes(clean)) return 'saturday';
+  if (deliveryZones.district.includes(clean))  return 'district';
+
+  // Дополнительная проверка: если в базе ПВЗ есть этот город — минимум district
+  const hasPickup = pickupPoints.some(p => p.city.toLowerCase() === clean);
+  if (hasPickup) return 'district';
+
+  return 'village';
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// РАСЧЁТ ДАТЫ ДОСТАВКИ
+// ──────────────────────────────────────────────────────────────────────────
+
+const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const DAYS_RU   = ['вс','пн','вт','ср','чт','пт','сб'];
+
+function formatDate(date) {
+  return `${DAYS_RU[date.getDay()]}, ${date.getDate()} ${MONTHS_RU[date.getMonth()]}`;
+}
+
+/**
+ * Добавляет рабочие дни к дате, пропуская вс (и сб для district/village).
+ */
+function addWorkingDays(date, days, skipSaturday) {
+  let added = 0;
+  const d = new Date(date);
+  while (added < days) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow === 0) continue;                    // пропускаем вс всегда
+    if (skipSaturday && dow === 6) continue;    // пропускаем сб для district/village
+    added++;
+  }
+  return d;
+}
+
+/**
+ * Возвращает объект с датами и описанием доставки.
+ * Отсечка: 12:00 — заказы после 12:00 уходят на следующий рабочий день.
+ *
+ * @param {'saturday'|'district'|'village'} zone
+ */
+function calcDeliveryDate(zone) {
+  const now = new Date();
+  const isAfterCutoff = now.getHours() >= 12;
+
+  // skipSaturday=false только для зоны saturday (Минск и крупные города)
+  const skipSaturday = (zone !== 'saturday');
+
+  let baseDate = new Date(now);
+
+  // После отсечки 12:00 — отправка идёт со следующего рабочего дня
+  if (isAfterCutoff) {
+    baseDate = addWorkingDays(baseDate, 1, skipSaturday);
+  } else {
+    // Убеждаемся, что сегодня — рабочий день (на случай если вызов в вс или сб для district)
+    const dow = baseDate.getDay();
+    if (dow === 0) {
+      // Воскресенье → следующий рабочий день
+      baseDate = addWorkingDays(baseDate, 1, skipSaturday);
+    } else if (dow === 6 && skipSaturday) {
+      // Суббота, доставки нет → следующий рабочий день (понедельник)
+      baseDate = addWorkingDays(baseDate, 1, true);
+    }
+  }
+
+  if (zone === 'saturday') {
+    // Минск, областные, крупные города: +1 день (Пн–Сб)
+    const deliveryDate = addWorkingDays(baseDate, 1, false);
+    return {
+      min_days: 1,
+      max_days: 1,
+      description: formatDate(deliveryDate),
+      note: isAfterCutoff ? 'Заказы после 12:00 — следующий рабочий день' : null
+    };
+  }
+
+  if (zone === 'district') {
+    // Районные города: +1 рабочий день, только Пн–Пт
+    const deliveryDate = addWorkingDays(baseDate, 1, true);
+    return {
+      min_days: 1,
+      max_days: 1,
+      description: formatDate(deliveryDate),
+      note: 'Доставка Пн–Пт, в течение дня. Звонок от водителя утром.'
+    };
+  }
+
+  // village: 1–2 рабочих дня, только Пн–Пт, время на усмотрение водителя
+  const minDate = addWorkingDays(baseDate, 1, true);
+  const maxDate = addWorkingDays(baseDate, 2, true);
+  return {
+    min_days: 1,
+    max_days: 2,
+    description: `${formatDate(minDate)} – ${formatDate(maxDate)}`,
+    note: 'Точное время и день определяет водитель. Доставка Пн–Пт.'
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// УЛУЧШЕННАЯ ФИЛЬТРАЦИЯ ГОРОДОВ (без дефолтного фолбэка на крупные города)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ищет ПВЗ по названию города.
+ * Возвращает пустой массив если ничего не найдено (НЕ дефолтные города).
+ */
 function findBestCityMatch(inputCity, pickupPoints) {
   if (!inputCity || !inputCity.trim()) {
     return [];
@@ -72,31 +243,26 @@ function findBestCityMatch(inputCity, pickupPoints) {
   
   // Удаляем префиксы и общие слова
   const cleanInput = normalizedInput
-    .replace(/^г\.?\s*/i, '')     // удаляем "г.", "г"
-    .replace(/^город\s+/i, '')     // удаляем "город"
-    .replace(/^п\.?\s*/i, '')     // удаляем "п.", "п" (поселок)
-    .replace(/^с\.?\s*/i, '')     // удаляем "с.", "с" (село)
-    .replace(/\s+беларусь$/i, '') // удаляем "беларусь" в конце
-    .replace(/[,;].*$/, '')       // удаляем после запятой/точки с запятой
-    .replace(/\s+обл\.?/i, '')    // удаляем "обл.", "обл" (область)
-    .replace(/\s+р-н\.?/i, '')    // удаляем "р-н", "р-н." (район)
+    .replace(/^г\.?\s*/i, '')
+    .replace(/^город\s+/i, '')
+    .replace(/^п\.?\s*/i, '')
+    .replace(/^с\.?\s*/i, '')
+    .replace(/\s+беларусь$/i, '')
+    .replace(/[,;].*$/, '')
+    .replace(/\s+обл\.?/i, '')
+    .replace(/\s+р-н\.?/i, '')
     .trim();
 
-  // Получаем все уникальные города
   const uniqueCities = [...new Set(pickupPoints.map(point => point.city))];
   
   // Точное совпадение (максимальный приоритет)
-  let exactMatches = uniqueCities.filter(city => 
-    city.toLowerCase() === cleanInput
-  );
+  const exactMatches = uniqueCities.filter(city => city.toLowerCase() === cleanInput);
   if (exactMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      exactMatches.includes(point.city)
-    );
+    return pickupPoints.filter(point => exactMatches.includes(point.city));
   }
 
   // Частичное совпадение слов (высокий приоритет)
-  let wordMatches = uniqueCities.filter(city => {
+  const wordMatches = uniqueCities.filter(city => {
     const cleanCity = city.toLowerCase()
       .replace(/^г\.?\s*/i, '')
       .replace(/^город\s+/i, '');
@@ -105,28 +271,22 @@ function findBestCityMatch(inputCity, pickupPoints) {
            cleanCity.includes(cleanInput);
   });
   if (wordMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      wordMatches.includes(point.city)
-    );
+    return pickupPoints.filter(point => wordMatches.includes(point.city));
   }
 
   // Частичное совпадение символов (средний приоритет)
-  let charMatches = uniqueCities.filter(city => {
+  const charMatches = uniqueCities.filter(city => {
     const cleanCity = city.toLowerCase()
       .replace(/^г\.?\s*/i, '')
       .replace(/^город\s+/i, '');
     return cleanInput.includes(cleanCity) || cleanCity.includes(cleanInput);
   });
   if (charMatches.length > 0) {
-    return pickupPoints.filter(point => 
-      charMatches.includes(point.city)
-    );
+    return pickupPoints.filter(point => charMatches.includes(point.city));
   }
 
-  // Нет совпадений - возвращаем точки по умолчанию (например, крупные города)
-  return pickupPoints.filter(point => 
-    ['Минск', 'Гомель', 'Витебск', 'Могилев', 'Гродно', 'Брест'].includes(point.city)
-  );
+  // Нет совпадений — возвращаем пустой массив (вызывающий код обработает это отдельно)
+  return [];
 }
 
 // Расчет стоимости доставки по весу
@@ -160,6 +320,119 @@ exports.handler = async (event, context) => {
   }
 
   const requestPath = event.path || '';
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // МАРШРУТ: /api/courier-door — внешний способ доставки «До двери»
+  // Вызывается InSales при оформлении заказа (передаёт адрес покупателя)
+  // ──────────────────────────────────────────────────────────────────────────
+  if (requestPath.includes('/courier-door')) {
+    try {
+      let order = {};
+      if (event.body) {
+        const body = JSON.parse(event.body);
+        order = body.order || body || {};
+      }
+
+      const fullLocalityName = order.shipping_address?.full_locality_name || '';
+      const locationCity     = order.shipping_address?.location?.city || '';
+      const locationSettl    = order.shipping_address?.location?.settlement || '';
+      const shippingCity     = order.shipping_address?.city || '';
+      const rawCity = fullLocalityName || locationCity || locationSettl || shippingCity;
+
+      const totalWeight = parseFloat(order.total_weight || 0) || 0.5;
+      const { price, currency } = calculateCourierPrice(totalWeight);
+
+      // Город не указан — заглушка
+      if (!rawCity || !rawCity.trim()) {
+        return {
+          statusCode: 200,
+          headers: CORS_HEADERS,
+          body: JSON.stringify([{
+            tariff_id: 'courier_door_placeholder',
+            shipping_company_handle: 'autolight_express',
+            price,
+            currency,
+            title: 'Курьер до двери',
+            description: 'Укажите населённый пункт, чтобы узнать сроки',
+            delivery_interval: { min_days: 1, max_days: 2, description: '1–2 дня' },
+            shipping_address: { full_locality_name: '', address: '', city: '', country: 'Беларусь' },
+            fields_values: [
+              { handle: 'shipping_address[full_locality_name]', value: '' },
+              { handle: 'shipping_address[address]', value: order.shipping_address?.address || '' }
+            ]
+          }])
+        };
+      }
+
+      const zone = classifySettlement(rawCity);
+      const dateInfo = calcDeliveryDate(zone);
+
+      // Формируем описание в зависимости от зоны
+      const zoneDescriptions = {
+        saturday: 'Минск, областные и крупные города — выбор времени доступен',
+        district: 'Районный город — доставка Пн–Пт, звонок от водителя',
+        village:  '⚠ Деревни и агрогородки — точное время определяет водитель'
+      };
+
+      const zoneTitles = {
+        saturday: 'Курьер до двери',
+        district: 'Курьер до двери',
+        village:  'Курьер до двери (1–2 дня)'
+      };
+
+      const currentAddress = order.shipping_address?.address || '';
+      const fullAddr = fullLocalityName || [rawCity, 'Беларусь'].filter(Boolean).join(', ');
+
+      const tariff = {
+        tariff_id: `courier_door_${zone}`,
+        shipping_company_handle: 'autolight_express',
+        price,
+        currency,
+        title: zoneTitles[zone],
+        description: `${zoneDescriptions[zone]}. Доставка: ${dateInfo.description}`,
+        delivery_interval: {
+          min_days: dateInfo.min_days,
+          max_days: dateInfo.max_days,
+          description: dateInfo.description
+        },
+        shipping_address: {
+          full_locality_name: fullAddr,
+          address: currentAddress,
+          city: rawCity,
+          country: 'Беларусь'
+        },
+        fields_values: [
+          { handle: 'shipping_address[full_locality_name]', value: fullAddr },
+          { handle: 'shipping_address[address]', value: currentAddress },
+          { handle: 'full_locality_name', value: fullAddr },
+          { handle: 'city', value: rawCity },
+          { handle: 'country', value: 'Беларусь' },
+          { handle: 'delivery_zone', value: zone },
+          { handle: 'delivery_date', value: dateInfo.description }
+        ]
+      };
+
+      // Для деревень добавляем предупреждение отдельным нередактируемым полем
+      if (zone === 'village') {
+        tariff.fields_values.push({
+          handle: 'delivery_note',
+          value: 'Доставка 1–2 рабочих дня. Время определяет водитель. Выходные не доставляем. Утром придёт SMS с номером водителя.'
+        });
+      }
+
+      return {
+        statusCode: 200,
+        headers: CORS_HEADERS,
+        body: JSON.stringify([tariff])
+      };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: err.message })
+      };
+    }
+  }
 
   // ──────────────────────────────────────────────────────────────────────────
   // МАРШРУТ: /api/courier/calculate — расчёт стоимости курьерской доставки
@@ -358,105 +631,102 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Улучшенная фильтрация ПВЗ по городу
+      // Фильтрация ПВЗ по городу
       const filteredPoints = findBestCityMatch(city, pickupPoints);
+
+      // Если ПВЗ в указанном городе нет — возвращаем тариф «недоступно»
+      if (filteredPoints.length === 0) {
+        const zone = classifySettlement(city);
+        const dateInfo = calcDeliveryDate(zone);
+        const price = calculatePrice(totalWeight);
+
+        // Для деревень и агрогородков ПВЗ объективно не бывает —
+        // даём понятное сообщение без ложной надежды
+        const noPickupTariff = {
+          tariff_id: 'pvz_not_available',
+          shipping_company_handle: 'autolight_express',
+          price,
+          currency: 'BYN',
+          title: 'Пункт выдачи недоступен',
+          description: zone === 'village'
+            ? `В деревни и агрогородки доставляем только курьером (1–2 дня). Выберите способ «Курьер до двери».`
+            : `В населённом пункте «${city}» нет пунктов выдачи. Выберите доставку курьером.`,
+          delivery_interval: {
+            min_days: dateInfo.min_days,
+            max_days: dateInfo.max_days,
+            description: dateInfo.description
+          },
+          shipping_address: {
+            full_locality_name: city,
+            address: '',
+            city,
+            country: 'Беларусь'
+          },
+          fields_values: [
+            { handle: 'shipping_address[full_locality_name]', value: city },
+            { handle: 'shipping_address[address]', value: '' },
+            { handle: 'city', value: city },
+            { handle: 'country', value: 'Беларусь' }
+          ]
+        };
+
+        return {
+          statusCode: 200,
+          headers: CORS_HEADERS,
+          body: JSON.stringify([noPickupTariff])
+        };
+      }
+
+      // ПВЗ найдены — определяем зону для расчёта даты
+      // ПВЗ есть только в городах → zone всегда district или minsk_oblast
+      const pvzZone = classifySettlement(city);
+      const pvzDateInfo = calcDeliveryDate(pvzZone);
 
       const tariffs = filteredPoints.map(point => {
         const price = calculatePrice(totalWeight);
-        
-        // Формируем полный адрес для full_locality_name
-        const fullAddress = point.delivery_address || 
+        const fullAddress = point.delivery_address ||
                            `${point.address}, ${point.city}, Беларусь`;
 
-        // Основной ответ по формату InSales документации
         return {
-          // Базовые поля тарифа
-          id: point.id,                    // Добавляем id для pickup points
-          tariff_id: `pvz_${point.id}`,    // Обязательное поле для множественных тарифов
+          id: point.id,
+          tariff_id: `pvz_${point.id}`,
           shipping_company_handle: 'autolight_express',
-          price: price,
+          price,
           currency: 'BYN',
-          
-          // Информация о доставке
-          title: `${point.name} ${point.address}`,
-          description: `(${point.working_hours})`,
-          
-          // Интервал доставки
+
+          // Коротко: только название ПВЗ (адрес — в description)
+          title: point.name,
+          // Адрес + расчётная дата — вместо часов работы
+          description: `${point.address} · ${pvzDateInfo.description}`,
+
           delivery_interval: {
-            min_days: 1,
-            max_days: 1,
-            description: `1 день`
+            min_days: pvzDateInfo.min_days,
+            max_days: pvzDateInfo.max_days,
+            description: pvzDateInfo.description
           },
-          
-          // КРИТИЧНО: Правильный формат shipping_address по документации
+
           shipping_address: {
-            // Это поле должно заполнить UI InSales
             full_locality_name: fullAddress,
-            // Дополнительные поля адреса
             address: point.address,
             city: point.city,
             country: 'Беларусь',
             postal_code: '',
-            
-            // Дополнительная информация для pickup point
             pickup_point_name: point.name,
             pickup_point_hours: point.working_hours
           },
-          
-          // КРИТИЧНО: fields_values по официальному формату документации
+
           fields_values: [
-            {
-              // Поле для полного адреса в shipping_address
-              handle: 'shipping_address[full_locality_name]',
-              value: fullAddress,
-              name: 'Полный адрес доставки'
-            },
-            {
-              // Поле для заполнения адреса в UI (по документации InSales)
-              handle: 'shipping_address[address]',
-              value: point.address,
-              name: 'Адрес доставки'
-            },
-            {
-              // Альтернативный формат поля адреса
-              handle: 'shipping_address_address',
-              value: point.address
-            },
-            {
-              // Дополнительное поле с полным адресом
-              handle: 'full_locality_name',
-              value: fullAddress
-            },
-            {
-              // Простое поле адреса
-              handle: 'address',
-              value: fullAddress
-            },
-            {
-              // Поле с ID pickup point
-              handle: 'pickup_point_id',
-              value: point.id.toString()
-            },
-            {
-              // Поле с названием pickup point
-              handle: 'pickup_point_name',
-              value: point.name
-            },
-            {
-              // Поле с городом
-              handle: 'city',
-              value: point.city
-            },
-            {
-              // Поле со страной
-              handle: 'country',
-              value: 'Беларусь'
-            },
-            {
-              // Поле с рабочими часами
-              handle: 'pickup_point_hours',
-              value: point.working_hours
-            }
+            { handle: 'shipping_address[full_locality_name]', value: fullAddress, name: 'Полный адрес доставки' },
+            { handle: 'shipping_address[address]', value: point.address, name: 'Адрес доставки' },
+            { handle: 'shipping_address_address', value: point.address },
+            { handle: 'full_locality_name', value: fullAddress },
+            { handle: 'address', value: fullAddress },
+            { handle: 'pickup_point_id', value: point.id.toString() },
+            { handle: 'pickup_point_name', value: point.name },
+            { handle: 'city', value: point.city },
+            { handle: 'country', value: 'Беларусь' },
+            { handle: 'pickup_point_hours', value: point.working_hours },
+            { handle: 'delivery_date', value: pvzDateInfo.description }
           ]
         };
       });
