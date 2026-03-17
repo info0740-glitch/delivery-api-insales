@@ -238,7 +238,7 @@ const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл
 const DAYS_RU   = ['вс','пн','вт','ср','чт','пт','сб'];
 
 function formatDate(date) {
-  return `${DAYS_RU[date.getDay()]}, ${date.getDate()} ${MONTHS_RU[date.getMonth()]}`;
+  return `Ориентировочно ${DAYS_RU[date.getDay()]}, ${date.getDate()} ${MONTHS_RU[date.getMonth()]}`;
 }
 
 /**
@@ -312,13 +312,39 @@ function addWorkingDays(date, days, skipSaturday) {
 }
 
 /**
+ * Определяет UTC смещение (в минутах) на основе кода страны
+ * @param {string} countryCode - двухбуквенный код страны (BY, RU и т.д.)
+ * @returns {number} смещение в минутах от UTC (отрицательное число)
+ */
+function getUtcOffsetByCountry(countryCode) {
+  const timezoneMap = {
+    'BY': -180,  // Беларусь: UTC+3 (зимой), UTC+3 (летом, нет перехода)
+    'RU': -180,  // Россия Московская (часть) UTC+3
+  };
+  return timezoneMap[countryCode?.toUpperCase()] || -180; // По умолчанию UTC+3
+}
+
+/**
  * Возвращает объект с датами и описанием доставки.
  * Отсечка: 12:00 — заказы после 12:00 уходят на следующий рабочий день.
  *
  * @param {'saturday'|'district'|'village'} zone
+ * @param {number} utcOffsetMinutes - смещение браузера от UTC в минутах (из getTimezoneOffset())
  */
-function calcDeliveryDate(zone) {
-  const now = new Date();
+function calcDeliveryDate(zone, utcOffsetMinutes = null) {
+  let now = new Date();
+  
+  // Если получено смещение браузера, пересчитываем время на местное
+  if (utcOffsetMinutes !== null && utcOffsetMinutes !== undefined) {
+    const serverUtcOffsetMs = now.getTimezoneOffset() * 60 * 1000;
+    const browserUtcOffsetMs = utcOffsetMinutes * 60 * 1000;
+    const correction = serverUtcOffsetMs - browserUtcOffsetMs;
+    now = new Date(now.getTime() + correction);
+    console.log(`[DATE] UTC offset браузера: ${utcOffsetMinutes} мин, время скорректировано`);
+  } else {
+    console.log(`[DATE] UTC offset не получен, используется серверное время`);
+  }
+  
   const isAfterCutoff = now.getHours() >= 12;
 
   // skipSaturday=false только для зоны saturday (Минск и крупные города)
@@ -455,6 +481,44 @@ function calculatePrice(weight) {
   return 200.0; // Для веса свыше 250 кг
 }
 
+/**
+ * Пытается определить UTC смещение на основе заголовков запроса
+ * Проверяет: CloudFlare, X-Forwarded-For, User-Agent и другие геолокационные подсказки
+ */
+function detectUtcOffsetFromHeaders(headers) {
+  // Cloudflare заголовки
+  const cfCountry = headers?.['cf-ipcountry'];
+  if (cfCountry) {
+    const offset = getUtcOffsetByCountry(cfCountry);
+    console.log(`[GEOIP] Cloudflare: ${cfCountry} → UTC offset: ${offset} мин`);
+    return offset;
+  }
+  
+  // Netlify Edge Functions может передать геоданные
+  const netlifyCountry = headers?.['x-country'] || headers?.['x-nf-country'];
+  if (netlifyCountry) {
+    const offset = getUtcOffsetByCountry(netlifyCountry);
+    console.log(`[GEOIP] Netlify: ${netlifyCountry} → UTC offset: ${offset} мин`);
+    return offset;
+  }
+  
+  // Accept-Language может дать подсказку (например: ru-BY, be-BY)
+  const acceptLang = headers?.['accept-language'];
+  if (acceptLang) {
+    if (acceptLang.includes('be') || acceptLang.includes('by')) {
+      console.log(`[GEOIP] Accept-Language: Беларусь (по локали)`);
+      return getUtcOffsetByCountry('BY');
+    }
+    if (acceptLang.includes('ru')) {
+      console.log(`[GEOIP] Accept-Language: Россия`);
+      return getUtcOffsetByCountry('RU');
+    }
+  }
+  
+  console.log(`[GEOIP] ⚠ Не удалось определить геолокацию, используется UTC+3`);
+  return getUtcOffsetByCountry('BY'); // По умолчанию UTC+3
+}
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -475,9 +539,11 @@ exports.handler = async (event, context) => {
   // ──────────────────────────────────────────────────────────────────────────
   if (requestPath.includes('/courier-door')) {
     try {
+      let requestBody = {};
       let order = {};
       if (event.body) {
         const body = JSON.parse(event.body);
+        requestBody = body;
         order = body.order || body || {};
       }
 
@@ -516,7 +582,12 @@ exports.handler = async (event, context) => {
       }
 
       const zone = classifySettlement(rawCity);
-      const dateInfo = calcDeliveryDate(zone);
+      // Пытаемся получить UTC offset: сначала из body (если фронтенд передал), затем из заголовков
+      let utcOffset = requestBody?.utc_offset;
+      if (!utcOffset && utcOffset !== 0) {
+        utcOffset = detectUtcOffsetFromHeaders(event.headers);
+      }
+      const dateInfo = calcDeliveryDate(zone, utcOffset);
 
       console.log(`[COURIER] Зона: ${zone}, дата: ${dateInfo.description}, цена: ${price} BYN`);
 
@@ -724,15 +795,21 @@ exports.handler = async (event, context) => {
       const locationSettlement = order.shipping_address?.location?.settlement || '';
       const shippingCity = order.shipping_address?.city || '';
 
-      // Пытаемся определить город по разным полям
-      const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
-      const isCityEmpty = !city || !city.trim();
+       // Пытаемся определить город по разным полям
+       const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
+       const isCityEmpty = !city || !city.trim();
 
-      // Получаем вес заказа
-      const totalWeightStr = order.total_weight || '0';
-      const totalWeight = parseFloat(totalWeightStr) || 0;
+       // Получаем вес заказа
+       const totalWeightStr = order.total_weight || '0';
+       const totalWeight = parseFloat(totalWeightStr) || 0;
+       
+       // Получаем UTC смещение: сначала из body, затем пытаемся определить из заголовков
+       let utcOffset = requestBody?.utc_offset;
+       if (!utcOffset && utcOffset !== 0) {
+         utcOffset = detectUtcOffsetFromHeaders(event.headers);
+       }
 
-      console.log(`[API] Запрос ПВЗ: город="${city}", вес=${totalWeight}кг`);
+       console.log(`[API] Запрос ПВЗ: город="${city}", вес=${totalWeight}кг, UTC offset=${utcOffset}`);
 
       if (isCityEmpty) {
         console.log('[API] Город не указан → возвращаем заглушку');
@@ -801,12 +878,13 @@ exports.handler = async (event, context) => {
 
       console.log(`[API] Найдено ПВЗ в городе "${city}": ${filteredPoints.length}`);
 
-      // Если ПВЗ в указанном городе нет — возвращаем тариф «недоступно»
-      if (filteredPoints.length === 0) {
-        const zone = classifySettlement(city);
-        const dateInfo = calcDeliveryDate(zone);
+       // Если ПВЗ в указанном городе нет — возвращаем тариф «недоступно»
+       if (filteredPoints.length === 0) {
+         const zone = classifySettlement(city);
+         // utcOffset уже определён выше, просто переиспользуем
+         const dateInfo = calcDeliveryDate(zone, utcOffset);
 
-        console.log(`[API] ПВЗ нет, зона: ${zone}, доставка: ${dateInfo.description}`);
+         console.log(`[API] ПВЗ нет, зона: ${zone}, доставка: ${dateInfo.description}`);
 
         // Для деревень и агрогородков ПВЗ объективно не бывает —
         // даём понятное сообщение без ложной надежды
@@ -845,12 +923,13 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // ПВЗ найдены — определяем зону для расчёта даты
-      // ПВЗ есть только в городах → zone всегда district или minsk_oblast
-      const pvzZone = classifySettlement(city);
-      const pvzDateInfo = calcDeliveryDate(pvzZone);
+       // ПВЗ найдены — определяем зону для расчёта даты
+       // ПВЗ есть только в городах → zone всегда district или minsk_oblast
+       const pvzZone = classifySettlement(city);
+       // utcOffset уже определён выше, просто переиспользуем
+       const pvzDateInfo = calcDeliveryDate(pvzZone, utcOffset);
 
-      console.log(`[API] ПВЗ найдены, зона: ${pvzZone}, доставка: ${pvzDateInfo.description}`);
+       console.log(`[API] ПВЗ найдены, зона: ${pvzZone}, доставка: ${pvzDateInfo.description}`);
 
       // Генерируем SVG для ПВЗ
       const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
