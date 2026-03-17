@@ -66,15 +66,77 @@ function calculateCourierPrice(weight) {
 // ЗОНИРОВАНИЕ НАСЕЛЁННЫХ ПУНКТОВ — загружается из zones.json
 // ──────────────────────────────────────────────────────────────────────────
 
+// Встроенные зоны по умолчанию (fallback на случай ошибки загрузки файла)
+const DEFAULT_ZONES = {
+  saturday: [
+    'минск', 'брест', 'витебск', 'гомель', 'гродно', 'могилев', 'могилёв',
+    'барановичи', 'бобруйск', 'борисов', 'жлобин', 'жодино', 'лида',
+    'молодечно', 'мозырь', 'новополоцк', 'орша', 'осиповичи', 'пинск',
+    'полоцк', 'речица', 'светлогорск', 'слоним', 'слуцк', 'солигорск',
+    'сморгонь', 'калинковичи', 'кобрин'
+  ],
+  district: [
+    'береза', 'берёза', 'берестовица', 'бешенковичи', 'браслав', 'брагин',
+    'буда-кошелево', 'буда-кошелёво', 'быхов', 'белоозерск', 'белоозёрск',
+    'белыничи', 'ветка', 'верхнедвинск', 'вилейка', 'волковыск', 'воложин',
+    'вороново', 'высокое', 'ганцевичи', 'глуск', 'глубокое', 'городок',
+    'горки', 'давид-городок', 'добруш', 'докшицы', 'дрибин', 'дрогичин',
+    'дубровно', 'дятлово', 'дзержинск', 'ельск', 'жабинка', 'житкович',
+    'заславль', 'зельва', 'иваново', 'ивацевичи', 'ивье', 'ивьё', 'каменец',
+    'кировск', 'климовичи', 'кличев', 'клецк', 'копыль', 'кореличи', 'корма',
+    'костюковичи', 'краснополье', 'кричев', 'круглое', 'крупки', 'лельчицы',
+    'лепель', 'лиозно', 'логойск', 'лоев', 'лунинец', 'любань', 'ляховичи',
+    'малорита', 'марьина горка', 'микашевичи', 'миоры', 'мстиславль',
+    'мядель', 'наровля', 'несвиж', 'новогрудок', 'новолукомль', 'октябрьский',
+    'ошмяны', 'петриков', 'поставы', 'пружаны', 'рогачев', 'рогачёв',
+    'россоны', 'свислочь', 'сенно', 'скидель', 'смолевичи', 'столбцы',
+    'столин', 'старые дороги', 'толочин', 'туров', 'узда', 'ушачи',
+    'фаниполь', 'хойники', 'хотимск', 'чашники', 'червень', 'чериков',
+    'чечерск', 'шарковщина', 'шклов', 'шумилино', 'щучин', 'березовка', 'берёзовка'
+  ]
+};
+
 let deliveryZones = { saturday: [], district: [] };
+let zonesLoadStatus = 'pending';
+
 try {
-  const zonesPath = path.join(__dirname, 'zones.json');
-  const zonesData = fs.readFileSync(zonesPath, 'utf8');
-  const parsed = JSON.parse(zonesData);
-  deliveryZones.saturday = (parsed.saturday || []).map(s => s.toLowerCase());
-  deliveryZones.district  = (parsed.district  || []).map(s => s.toLowerCase());
+  // Пробуем несколько путей для совместимости с Netlify
+  const possiblePaths = [
+    path.join(__dirname, 'zones.json'),
+    path.resolve(__dirname, 'zones.json'),
+    path.join(process.cwd(), 'functions', 'zones.json'),
+    path.resolve(process.cwd(), 'zones.json')
+  ];
+
+  let loaded = false;
+  for (const zonesPath of possiblePaths) {
+    try {
+      const zonesData = fs.readFileSync(zonesPath, 'utf8');
+      const parsed = JSON.parse(zonesData);
+      deliveryZones.saturday = (parsed.saturday || []).map(s => s.toLowerCase());
+      deliveryZones.district = (parsed.district || []).map(s => s.toLowerCase());
+      console.log(`[ZONES] ✅ Загружено из: ${zonesPath}`);
+      console.log(`[ZONES] Saturday: ${deliveryZones.saturday.length} городов`);
+      console.log(`[ZONES] District: ${deliveryZones.district.length} городов`);
+      loaded = true;
+      zonesLoadStatus = 'loaded';
+      break;
+    } catch (e) {
+      // Пробуем следующий путь
+    }
+  }
+
+  if (!loaded) {
+    throw new Error('Файл не найден ни по одному из путей');
+  }
 } catch (e) {
-  console.error('Ошибка загрузки zones.json:', e.message);
+  console.error(`[ZONES] ❌ Ошибка загрузки zones.json: ${e.message}`);
+  console.error('[ZONES] ⚠️ Используем встроенные зоны по умолчанию');
+  deliveryZones.saturday = [...DEFAULT_ZONES.saturday];
+  deliveryZones.district = [...DEFAULT_ZONES.district];
+  console.log(`[ZONES] Saturday (fallback): ${deliveryZones.saturday.length} городов`);
+  console.log(`[ZONES] District (fallback): ${deliveryZones.district.length} городов`);
+  zonesLoadStatus = 'fallback';
 }
 
 // Префиксы, однозначно указывающие на сельский тип населённого пункта
@@ -122,14 +184,24 @@ function classifySettlement(rawName) {
   const raw = rawName.trim();
 
   // Явный сельский тип — сразу village
-  if (VILLAGE_PREFIXES.test(raw)) return 'village';
+  if (VILLAGE_PREFIXES.test(raw)) {
+    console.log(`[ZONE] "${raw}" → village (сельский префикс)`);
+    return 'village';
+  }
 
   const clean = normalizeSettlementName(raw);
 
-  if (deliveryZones.saturday.includes(clean)) return 'saturday';
-  if (deliveryZones.district.includes(clean))  return 'district';
+  if (deliveryZones.saturday.includes(clean)) {
+    console.log(`[ZONE] "${raw}" → saturday (в списке saturday)`);
+    return 'saturday';
+  }
+  if (deliveryZones.district.includes(clean)) {
+    console.log(`[ZONE] "${raw}" → district (в списке district)`);
+    return 'district';
+  }
 
   // Всё остальное — village (деревни, агрогородки, малые населённые пункты)
+  console.log(`[ZONE] "${raw}" → village (не найден в зонах, clean="${clean}")`);
   return 'village';
 }
 
@@ -393,8 +465,11 @@ exports.handler = async (event, context) => {
       const totalWeight = parseFloat(order.total_weight || 0) || 0.5;
       const { price, currency } = calculateCourierPrice(totalWeight);
 
+      console.log(`[COURIER] Запрос: город="${rawCity}", вес=${totalWeight}кг`);
+
       // Город не указан — заглушка
       if (!rawCity || !rawCity.trim()) {
+        console.log('[COURIER] Город не указан → возвращаем заглушку');
         return {
           statusCode: 200,
           headers: CORS_HEADERS,
@@ -417,6 +492,8 @@ exports.handler = async (event, context) => {
 
       const zone = classifySettlement(rawCity);
       const dateInfo = calcDeliveryDate(zone);
+
+      console.log(`[COURIER] Зона: ${zone}, дата: ${dateInfo.description}, цена: ${price} BYN`);
 
       // Формируем описание в зависимости от зоны
       const zoneDescriptions = {
@@ -540,8 +617,12 @@ exports.handler = async (event, context) => {
       }
       if (weight <= 0) weight = 0.5;
 
+      console.log(`[PICKUP] Запрос: город="${city}", вес=${weight}кг`);
+
       const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
       const price = calculatePrice(weight);
+
+      console.log(`[PICKUP] Найдено ПВЗ: ${points.length}`);
 
       const result = points.map(point => ({
         id: point.id,
@@ -562,6 +643,7 @@ exports.handler = async (event, context) => {
         body: JSON.stringify(result)
       };
     } catch (err) {
+      console.error(`[PICKUP] Ошибка: ${err.message}`);
       return {
         statusCode: 500,
         headers: CORS_HEADERS,
@@ -616,16 +698,19 @@ exports.handler = async (event, context) => {
       const locationCity = order.shipping_address?.location?.city || '';
       const locationSettlement = order.shipping_address?.location?.settlement || '';
       const shippingCity = order.shipping_address?.city || '';
-      
+
       // Пытаемся определить город по разным полям
       const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
       const isCityEmpty = !city || !city.trim();
-      
+
       // Получаем вес заказа
       const totalWeightStr = order.total_weight || '0';
       const totalWeight = parseFloat(totalWeightStr) || 0;
 
+      console.log(`[API] Запрос ПВЗ: город="${city}", вес=${totalWeight}кг`);
+
       if (isCityEmpty) {
+        console.log('[API] Город не указан → возвращаем заглушку');
         const price = calculatePrice(totalWeight);
         const placeholderTariff = [{
           id: 'pvz_enter_city',
@@ -689,10 +774,14 @@ exports.handler = async (event, context) => {
       // Фильтрация ПВЗ по городу
       const filteredPoints = findBestCityMatch(city, pickupPoints);
 
+      console.log(`[API] Найдено ПВЗ в городе "${city}": ${filteredPoints.length}`);
+
       // Если ПВЗ в указанном городе нет — возвращаем тариф «недоступно»
       if (filteredPoints.length === 0) {
         const zone = classifySettlement(city);
         const dateInfo = calcDeliveryDate(zone);
+
+        console.log(`[API] ПВЗ нет, зона: ${zone}, доставка: ${dateInfo.description}`);
 
         // Для деревень и агрогородков ПВЗ объективно не бывает —
         // даём понятное сообщение без ложной надежды
@@ -735,7 +824,9 @@ exports.handler = async (event, context) => {
       // ПВЗ есть только в городах → zone всегда district или minsk_oblast
       const pvzZone = classifySettlement(city);
       const pvzDateInfo = calcDeliveryDate(pvzZone);
-      
+
+      console.log(`[API] ПВЗ найдены, зона: ${pvzZone}, доставка: ${pvzDateInfo.description}`);
+
       // Генерируем SVG для ПВЗ
       const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
 
