@@ -148,6 +148,60 @@ function formatDate(date) {
 }
 
 /**
+ * Генерирует SVG-календарь для визуализации сроков доставки.
+ * Компактный дизайн с иконкой календаря и датами.
+ */
+function generateDeliverySvg(dateInfo) {
+  const isRange = dateInfo.min_days !== dateInfo.max_days || dateInfo.description.includes('–');
+  
+  // Парсим даты из description
+  const dateParts = dateInfo.description.split(' – ');
+  const startDate = dateParts[0] || dateInfo.description;
+  const endDate = dateParts[1] || null;
+  
+  // Базовые размеры
+  const width = isRange && endDate ? 280 : 200;
+  const height = 48;
+  
+  // SVG шаблон
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+  
+  // Фон с закруглением
+  svg += `<rect width="${width}" height="${height}" rx="8" fill="#E8F5E9" stroke="#4CAF50" stroke-width="1.5"/>`;
+  
+  // Иконка календаря (слева)
+  svg += `<g transform="translate(10, 10)">
+    <rect x="0" y="4" width="24" height="20" rx="3" fill="white" stroke="#4CAF50" stroke-width="1.5"/>
+    <line x1="4" y1="10" x2="20" y2="10" stroke="#4CAF50" stroke-width="1.5"/>
+    <line x1="8" y1="0" x2="8" y2="6" stroke="#4CAF50" stroke-width="2" stroke-linecap="round"/>
+    <line x1="16" y1="0" x2="16" y2="6" stroke="#4CAF50" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="8" cy="18" r="1.5" fill="#4CAF50"/>
+    <circle cx="16" cy="18" r="1.5" fill="#4CAF50"/>
+  </g>`;
+  
+  // Текст с датами
+  const textX = 42;
+  const textY = 20;
+  
+  if (isRange && endDate) {
+    // Две даты с тире между ними
+    svg += `<text x="${textX}" y="${textY}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2E7D32">${startDate}</text>`;
+    svg += `<text x="${textX + 110}" y="${textY}" font-family="Arial, sans-serif" font-size="18" font-weight="300" fill="#4CAF50">–</text>`;
+    svg += `<text x="${textX + 130}" y="${textY}" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2E7D32">${endDate}</text>`;
+  } else {
+    // Одна дата
+    svg += `<text x="${textX}" y="${textY}" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#2E7D32">${startDate}</text>`;
+  }
+  
+  // Подпись "доставка" внизу
+  svg += `<text x="${textX}" y="${textY + 16}" font-family="Arial, sans-serif" font-size="11" fill="#66BB6A">доставка</text>`;
+  
+  svg += `</svg>`;
+  
+  return svg;
+}
+
+/**
  * Добавляет рабочие дни к дате, пропуская вс (и сб для district/village).
  */
 function addWorkingDays(date, days, skipSaturday) {
@@ -380,6 +434,9 @@ exports.handler = async (event, context) => {
         village:  'Курьер до двери (1–2 дня)'
       };
 
+      // Генерируем SVG-календарь для визуализации сроков доставки
+      const deliverySvg = generateDeliverySvg(dateInfo);
+
       const currentAddress = order.shipping_address?.address || '';
       const fullAddr = fullLocalityName || [rawCity, 'Беларусь'].filter(Boolean).join(', ');
 
@@ -408,7 +465,8 @@ exports.handler = async (event, context) => {
           { handle: 'city', value: rawCity },
           { handle: 'country', value: 'Беларусь' },
           { handle: 'delivery_zone', value: zone },
-          { handle: 'delivery_date', value: dateInfo.description }
+          { handle: 'delivery_date', value: dateInfo.description },
+          { handle: 'delivery_svg', value: deliverySvg }
         ]
       };
 
@@ -681,6 +739,9 @@ exports.handler = async (event, context) => {
       // ПВЗ есть только в городах → zone всегда district или minsk_oblast
       const pvzZone = classifySettlement(city);
       const pvzDateInfo = calcDeliveryDate(pvzZone);
+      
+      // Генерируем SVG для ПВЗ
+      const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
 
       const tariffs = filteredPoints.map(point => {
         const price = calculatePrice(totalWeight);
@@ -726,7 +787,8 @@ exports.handler = async (event, context) => {
             { handle: 'city', value: point.city },
             { handle: 'country', value: 'Беларусь' },
             { handle: 'pickup_point_hours', value: point.working_hours },
-            { handle: 'delivery_date', value: pvzDateInfo.description }
+            { handle: 'delivery_date', value: pvzDateInfo.description },
+            { handle: 'delivery_svg', value: pvzDeliverySvg }
           ]
         };
       });
