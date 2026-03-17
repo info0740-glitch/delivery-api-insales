@@ -238,24 +238,24 @@ function formatDate(date) {
 }
 
 /**
- * Генерирует простой текстовый вывод для визуализации сроков доставки с эмодзи.
- * Вместо SVG используем эмодзи (!), которое видно везде.
+ * Генерирует форматированный вывод для визуализации сроков доставки.
+ * Эмодзи + явное указание срока делает информацию заметной и понятной.
  */
 function generateDeliverySvg(dateInfo) {
-  // Парсим даты из description
-  const dateParts = dateInfo.description.split(' – ');
-  const startDate = dateParts[0] || dateInfo.description;
-  const endDate = dateParts[1] || null;
-  
-  // Проверяем, есть ли реальный диапазон (разные даты)
-  const isRange = endDate && startDate !== endDate;
-  
-  // Возвращаем простой текст с эмодзи вместо SVG
-  if (isRange) {
-    return `❗ ${startDate} – ${endDate}`;
-  } else {
-    return `❗ ${startDate}`;
-  }
+   // Парсим даты из description
+   const dateParts = dateInfo.description.split(' – ');
+   const startDate = dateParts[0] || dateInfo.description;
+   const endDate = dateParts[1] || null;
+   
+   // Проверяем, есть ли реальный диапазон (разные даты)
+   const isRange = endDate && startDate !== endDate;
+   
+   // Возвращаем текст с календарным эмодзи (более узнаваемо для сроков)
+   if (isRange) {
+     return `📅 ${startDate} – ${endDate}`;
+   } else {
+     return `📅 ${startDate}`;
+   }
 }
 
 /**
@@ -330,37 +330,37 @@ function calcDeliveryDate(zone, utcOffsetMinutes = null) {
     }
   }
 
-  if (zone === 'saturday') {
-    // Минск, областные, крупные города: +1 день (Пн–Сб)
-    const deliveryDate = addWorkingDays(baseDate, 1, false);
-    return {
-      min_days: 1,
-      max_days: 1,
-      description: formatDate(deliveryDate),
-      note: isAfterCutoff ? 'Заказы после 12:00 — следующий рабочий день' : null
-    };
-  }
+   if (zone === 'saturday') {
+     // Минск, областные, крупные города: +1 день (Пн–Сб)
+     const deliveryDate = addWorkingDays(baseDate, 1, false);
+     return {
+       min_days: 1,
+       max_days: 1,
+       description: formatDate(deliveryDate),
+       note: isAfterCutoff ? 'Заказ после 12:00 уходит на следующий рабочий день' : null
+     };
+   }
 
-  if (zone === 'district') {
-    // Районные города: +1 рабочий день, только Пн–Пт
-    const deliveryDate = addWorkingDays(baseDate, 1, true);
-    return {
-      min_days: 1,
-      max_days: 1,
-      description: formatDate(deliveryDate),
-      note: 'Доставка Пн–Пт, в течение дня. Звонок от водителя утром.'
-    };
-  }
+   if (zone === 'district') {
+     // Районные города: +1 рабочий день, только Пн–Пт
+     const deliveryDate = addWorkingDays(baseDate, 1, true);
+     return {
+       min_days: 1,
+       max_days: 1,
+       description: formatDate(deliveryDate),
+       note: 'Доставка Пн–Пт, в течение дня • Утром СМС с телефоном водителя'
+     };
+   }
 
-  // village: 1–2 рабочих дня, только Пн–Пт, время на усмотрение водителя
-  const minDate = addWorkingDays(baseDate, 1, true);
-  const maxDate = addWorkingDays(baseDate, 2, true);
-  return {
-    min_days: 1,
-    max_days: 2,
-    description: `${formatDate(minDate)} – ${formatDate(maxDate)}`,
-    note: 'Точное время и день определяет водитель. Доставка Пн–Пт.'
-  };
+   // village: 1–2 рабочих дня, только Пн–Пт, время на усмотрение водителя
+   const minDate = addWorkingDays(baseDate, 1, true);
+   const maxDate = addWorkingDays(baseDate, 2, true);
+   return {
+     min_days: 1,
+     max_days: 2,
+     description: `${formatDate(minDate)} – ${formatDate(maxDate)}`,
+     note: 'Пн–Пт • Точное время определяет водитель • SMS утром'
+   };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -554,12 +554,13 @@ exports.handler = async (event, context) => {
 
       console.log(`[COURIER] Зона: ${zone}, дата: ${dateInfo.description}, цена: ${price} BYN`);
 
-      // Формируем описание в зависимости от зоны
-      const zoneDescriptions = {
-        saturday: 'Минск, областные и крупные города — с 9-00 до 22-00, доступна доставка в субботу',
-        district: 'Районный город — доставка Пн–Пт, с 9-00 до 18-00, звонок от водителя',
-        village:  '⚠ Деревни и агрогородки с 9-00 до 18-00 — точное время определяет водитель'
-      };
+       // Формируем описание в зависимости от зоны
+       // Эмодзи и структурированный текст делают информацию более заметной и быстрой для восприятия
+       const zoneDescriptions = {
+         saturday: '🚗 Минск, обл. города • Пн–Пт: 9:00–22:00 • Сб: 9:00–17:00',
+         district: '🚗 Районный город • 9:00–18:00 (Пн–Пт) • СМС утром',
+         village:  '🚗 Деревни, агрогородки • 9:00–18:00 (Пн–Пт) • Время определяет водитель'
+       };
 
       const zoneTitles = {
         saturday: 'Курьер до двери',
@@ -603,13 +604,13 @@ exports.handler = async (event, context) => {
         ]
       };
 
-      // Для деревень добавляем предупреждение отдельным нередактируемым полем
-      if (zone === 'village') {
-        tariff.fields_values.push({
-          handle: 'delivery_note',
-          value: 'Доставка 1–2 рабочих дня. Время определяет водитель. Выходные не доставляем. Утром придёт SMS с номером водителя.'
-        });
-      }
+       // Для деревень добавляем предупреждение отдельным нередактируемым полем
+       if (zone === 'village') {
+         tariff.fields_values.push({
+           handle: 'delivery_note',
+           value: '⏰ 1–2 рабочих дня (Пн–Пт) • Время определяет водитель • SMS утром'
+         });
+       }
 
       return {
         statusCode: 200,
@@ -865,22 +866,22 @@ exports.handler = async (event, context) => {
       // Генерируем SVG для ПВЗ
       const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
 
-      const tariffs = filteredPoints.map(point => {
-        const price = calculatePrice(totalWeight);
-        const fullAddress = point.delivery_address ||
-                           `${point.address}, ${point.city}, Беларусь`;
+       const tariffs = filteredPoints.map(point => {
+         const price = calculatePrice(totalWeight);
+         const fullAddress = point.delivery_address ||
+                            `${point.address}, ${point.city}, Беларусь`;
 
-        return {
-          id: point.id,
-          tariff_id: `pvz_${point.id}`,
-          shipping_company_handle: 'autolight_express',
-          price,
-          currency: 'BYN',
+         return {
+           id: point.id,
+           tariff_id: `pvz_${point.id}`,
+           shipping_company_handle: 'autolight_express',
+           price,
+           currency: 'BYN',
 
-          // Коротко: только название ПВЗ (адрес — в description)
-          title: point.name,
-          // Адрес без срока доставки (срок отображается отдельным полем в интерфейсе)
-          description: point.address,
+           // Название ПВЗ (компактно)
+           title: point.name,
+           // Адрес вместо номера — пользователь сразу видит, куда едет заказ (основная информационная потребность)
+           description: `📍 ${point.address}`,
 
           delivery_interval: {
             min_days: pvzDateInfo.min_days,
