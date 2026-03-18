@@ -867,20 +867,21 @@ exports.handler = async (event, context) => {
       const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
 
        const tariffs = filteredPoints.map(point => {
-         const price = calculatePrice(totalWeight);
-         const fullAddress = point.delivery_address ||
-                            `${point.address}, ${point.city}, Беларусь`;
+          const price = calculatePrice(totalWeight);
+          const fullAddress = point.delivery_address ||
+                             `${point.address}, ${point.city}, Беларусь`;
 
-         return {
-           id: point.id,
-           tariff_id: `pvz_${point.id}`,
-           shipping_company_handle: 'autolight_express',
-           price,
-           currency: 'BYN',
+          return {
+            id: point.id,
+            tariff_id: `pvz_${point.id}`,
+            shipping_company_handle: 'autolight_express',
+            price,
+            currency: 'BYN',
 
-           // UX: адрес в заголовке — главное что нужно клиенту, часы работы в описании
-           title: `🏪 ${point.address}`,
-           description: `🕐 ${point.working_hours}`,
+            // UX: адрес в заголовке — главное что нужно клиенту
+            title: `🏪 ${point.address}`,
+            // UX: описание показывает тип пункта и ТК вместо часов работы (часы в shipping_address)
+            description: `🚚 Автолайт экспресс • Пункт самовывоза`,
 
           delivery_interval: {
             min_days: pvzDateInfo.min_days,
