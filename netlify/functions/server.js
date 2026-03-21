@@ -233,6 +233,118 @@ function classifySettlement(rawName) {
 const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 const DAYS_RU   = ['вс','пн','вт','ср','чт','пт','сб'];
 
+/**
+ * Государственные праздники Беларуси (нерабочие дни)
+ * Формат: 'YYYY-MM-DD' или 'MM-DD' (для ежегодных)
+ * 
+ * Источники: Трудовой кодекс РБ, ст.147
+ * 
+ * Если праздник выпадает на субботу/воскресенье — перенос не предусмотрен (официально)
+ * Но для логистики добавим ручные переносы при необходимости
+ */
+const BELARUS_HOLIDAYS = [
+  // Фиксированные даты
+  '01-01', // 1 января — Новый год
+  '01-02', // 2 января — Новый год
+  '01-07', // 7 января — Рождество Христово (православное)
+  '03-08', // 8 марта — День женщин
+  '05-01', // 1 мая — Праздник труда
+  '05-09', // 9 мая — День Победы
+  '07-03', // 3 июля — День независимости
+  '11-07', // 7 ноября — День Октябрьской революции
+  '12-25', // 25 декабря — Рождество Христово (католическое)
+  
+  // Плавающие праздники (рассчитываются отдельно)
+  // Пасха (православная) — добавляется динамически
+  // Радуница (9 дней после Пасхи) — добавляется динамически
+];
+
+/**
+ * Рассчитывает дату Пасхи для заданного года (православная, по Александрийской пасхалии)
+ * @param {number} year 
+ * @returns {Date} дата Пасхи
+ */
+function getOrthodoxEaster(year) {
+  // Алгоритм Гаусса для православной Пасхи
+  const a = year % 19;
+  const b = year % 4;
+  const c = year % 7;
+  const d = (19 * a + 15) % 30;
+  const e = (2 * b + 4 * c + 6 * d + 6) % 7;
+  const f = d + e;
+  
+  let day, month;
+  if (f <= 9) {
+    // Март
+    day = f + 22; // по старому стилю
+    day += 13;    // перевод на новый стиль (XX-XXI вв)
+    if (day > 31) {
+      day -= 31;
+      month = 4; // Апрель
+    } else {
+      month = 3; // Март
+    }
+  } else {
+    // Апрель
+    day = f - 9; // по старому стилю
+    day += 13;   // перевод на новый стиль
+    if (day > 30) {
+      day -= 30;
+      month = 5; // Май
+    } else {
+      month = 4; // Апрель
+    }
+  }
+  
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * Рассчитывает дату Радуницы (9 дней после Пасхи, вторник)
+ * @param {number} year 
+ * @returns {Date} дата Радуницы
+ */
+function getRadunitsa(year) {
+  const easter = getOrthodoxEaster(year);
+  const radunitsa = new Date(easter);
+  radunitsa.setDate(easter.getDate() + 9);
+  return radunitsa;
+}
+
+/**
+ * Проверяет, является ли дата выходным днем в Беларуси
+ * @param {Date} date 
+ * @returns {boolean} true если выходной
+ */
+function isBelarusHoliday(date) {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const dateStr = `${month}-${day}`;
+  const year = date.getFullYear();
+  
+  // Проверка фиксированных праздников
+  if (BELARUS_HOLIDAYS.includes(dateStr)) {
+    console.log(`[HOLIDAY] ${date.toISOString().split('T')[0]} — государственный праздник`);
+    return true;
+  }
+  
+  // Проверка Пасхи
+  const easter = getOrthodoxEaster(year);
+  if (easter.getDate() === date.getDate() && easter.getMonth() === date.getMonth()) {
+    console.log(`[HOLIDAY] ${date.toISOString().split('T')[0]} — Пасха`);
+    return true;
+  }
+  
+  // Проверка Радуницы
+  const radunitsa = getRadunitsa(year);
+  if (radunitsa.getDate() === date.getDate() && radunitsa.getMonth() === date.getMonth()) {
+    console.log(`[HOLIDAY] ${date.toISOString().split('T')[0]} — Радуница`);
+    return true;
+  }
+  
+  return false;
+}
+
 function formatDate(date) {
   return `Ориентировочно ${DAYS_RU[date.getDay()]}, ${date.getDate()} ${MONTHS_RU[date.getMonth()]}`;
 }
@@ -259,7 +371,7 @@ function generateDeliverySvg(dateInfo) {
 }
 
 /**
- * Добавляет рабочие дни к дате, пропуская вс (и сб для district/village).
+ * Добавляет рабочие дни к дате, пропуская вс (и сб для district/village) и гос. праздники Беларуси.
  */
 function addWorkingDays(date, days, skipSaturday) {
   let added = 0;
@@ -269,6 +381,7 @@ function addWorkingDays(date, days, skipSaturday) {
     const dow = d.getDay();
     if (dow === 0) continue;                    // пропускаем вс всегда
     if (skipSaturday && dow === 6) continue;    // пропускаем сб для district/village
+    if (isBelarusHoliday(d)) continue;          // пропускаем государственные праздники
     added++;
   }
   return d;
@@ -309,6 +422,7 @@ function calcDeliveryDate(zone, utcOffsetMinutes = null) {
   }
   
   const isAfterCutoff = now.getHours() >= 12;
+  const currentDayOfWeek = now.getDay();
 
   // skipSaturday=false только для зоны saturday (Минск и крупные города)
   const skipSaturday = (zone !== 'saturday');
@@ -317,17 +431,29 @@ function calcDeliveryDate(zone, utcOffsetMinutes = null) {
 
   // После отсечки 12:00 — отправка идёт со следующего рабочего дня
   if (isAfterCutoff) {
-    baseDate = addWorkingDays(baseDate, 1, skipSaturday);
-  } else {
-    // Убеждаемся, что сегодня — рабочий день (на случай если вызов в вс или сб для district)
-    const dow = baseDate.getDay();
-    if (dow === 0) {
-      // Воскресенье → следующий рабочий день
+    // Если сегодня пятница (5) и после 12:00 → отправка в понедельник (1)
+    // Для zone 'saturday': пятница после 12:00 → отправка в понедельник, так как суббота — уже выходной для отправки
+    // Для district/village: пятница после 12:00 → отправка в понедельник (суббота и вс — выходные)
+    if (currentDayOfWeek === 5) {
+      // Пятница после 12:00 → следующий рабочий день понедельник (+3 календарных дня)
+      baseDate.setDate(baseDate.getDate() + 3);
+    } else if (currentDayOfWeek === 6) {
+      // Суббота → следующий рабочий день понедельник (+2 календарных дня)
+      baseDate.setDate(baseDate.getDate() + 2);
+    } else {
+      // Другие дни → следующий рабочий день
       baseDate = addWorkingDays(baseDate, 1, skipSaturday);
-    } else if (dow === 6 && skipSaturday) {
-      // Суббота, доставки нет → следующий рабочий день (понедельник)
-      baseDate = addWorkingDays(baseDate, 1, true);
     }
+  } else {
+    // До 12:00 — отправка сегодня, если это рабочий день
+    if (currentDayOfWeek === 0) {
+      // Воскресенье → следующий рабочий день (понедельник)
+      baseDate = addWorkingDays(baseDate, 1, skipSaturday);
+    } else if (currentDayOfWeek === 6 && skipSaturday) {
+      // Суббота, но зона не saturday → следующий рабочий день (понедельник)
+      baseDate = addWorkingDays(baseDate, 2, true);
+    }
+    // Если суббота и зона saturday → отправка сегодня (суббота рабочий день)
   }
 
    if (zone === 'saturday') {
