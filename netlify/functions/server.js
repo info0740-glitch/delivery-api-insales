@@ -429,31 +429,29 @@ function calcDeliveryDate(zone, utcOffsetMinutes = null) {
 
   let baseDate = new Date(now);
 
-  // После отсечки 12:00 — отправка идёт со следующего рабочего дня
-  if (isAfterCutoff) {
-    // Если сегодня пятница (5) и после 12:00 → отправка в понедельник (1)
-    // Для zone 'saturday': пятница после 12:00 → отправка в понедельник, так как суббота — уже выходной для отправки
-    // Для district/village: пятница после 12:00 → отправка в понедельник (суббота и вс — выходные)
-    if (currentDayOfWeek === 5) {
-      // Пятница после 12:00 → следующий рабочий день понедельник (+3 календарных дня)
-      baseDate.setDate(baseDate.getDate() + 3);
-    } else if (currentDayOfWeek === 6) {
-      // Суббота → следующий рабочий день понедельник (+2 календарных дня)
-      baseDate.setDate(baseDate.getDate() + 2);
-    } else {
-      // Другие дни → следующий рабочий день
-      baseDate = addWorkingDays(baseDate, 1, skipSaturday);
-    }
+  // Определяем дату отправки (baseDate).
+  // ВАЖНО: суббота — день ДОСТАВКИ, а не отправки. Отправка только Пн–Пт.
+  // Поэтому заказы в пятницу после 12:00, в субботу или воскресенье → отправка в понедельник.
+
+  if (currentDayOfWeek === 6) {
+    // Суббота (любое время) → отправка в понедельник (+2 календарных дня)
+    baseDate.setDate(baseDate.getDate() + 2);
+    console.log(`[DATE] Суббота → отправка в понедельник`);
+  } else if (currentDayOfWeek === 0) {
+    // Воскресенье (любое время) → отправка в понедельник (+1 календарный день)
+    baseDate.setDate(baseDate.getDate() + 1);
+    console.log(`[DATE] Воскресенье → отправка в понедельник`);
+  } else if (currentDayOfWeek === 5 && isAfterCutoff) {
+    // Пятница после 12:00 → отправка в понедельник (+3 календарных дня)
+    baseDate.setDate(baseDate.getDate() + 3);
+    console.log(`[DATE] Пятница после 12:00 → отправка в понедельник`);
+  } else if (isAfterCutoff) {
+    // Пн–Чт после 12:00 → отправка на следующий рабочий день (только Пн–Пт, skipSaturday=true)
+    baseDate = addWorkingDays(baseDate, 1, true);
+    console.log(`[DATE] После 12:00 → отправка на следующий рабочий день`);
   } else {
-    // До 12:00 — отправка сегодня, если это рабочий день
-    if (currentDayOfWeek === 0) {
-      // Воскресенье → следующий рабочий день (понедельник)
-      baseDate = addWorkingDays(baseDate, 1, skipSaturday);
-    } else if (currentDayOfWeek === 6 && skipSaturday) {
-      // Суббота, но зона не saturday → следующий рабочий день (понедельник)
-      baseDate = addWorkingDays(baseDate, 2, true);
-    }
-    // Если суббота и зона saturday → отправка сегодня (суббота рабочий день)
+    // До 12:00 в рабочий день (Пн–Пт) → отправка сегодня (baseDate остаётся)
+    console.log(`[DATE] До 12:00, рабочий день → отправка сегодня`);
   }
 
    if (zone === 'saturday') {
