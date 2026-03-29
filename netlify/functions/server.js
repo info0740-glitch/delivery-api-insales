@@ -803,6 +803,18 @@ exports.handler = async (event, context) => {
 
       console.log(`[PICKUP] Запрос: город="${city}", вес=${weight}кг`);
 
+      if (!city || !city.trim()) {
+        console.log('[PICKUP] Город не указан → возвращаем пустой список');
+        return {
+          statusCode: 200,
+          headers: CORS_HEADERS,
+          body: JSON.stringify({
+            pickup_points: [],
+            hint: 'Укажите населённый пункт, чтобы увидеть пункты выдачи'
+          })
+        };
+      }
+
       const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
       const price = calculatePrice(weight);
 
