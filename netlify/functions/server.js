@@ -651,20 +651,7 @@ exports.handler = async (event, context) => {
         return {
           statusCode: 200,
           headers: CORS_HEADERS,
-          body: JSON.stringify([{
-            tariff_id: 'courier_door_placeholder',
-            shipping_company_handle: 'autolight_express',
-            price,
-            currency,
-            title: 'Курьер до двери',
-            description: 'Укажите населённый пункт, чтобы узнать сроки',
-            delivery_interval: { min_days: 1, max_days: 2, description: '1–2 дня' },
-            shipping_address: { full_locality_name: '', address: '', city: '', country: 'Беларусь' },
-            fields_values: [
-              { handle: 'shipping_address[full_locality_name]', value: '' },
-              { handle: 'shipping_address[address]', value: order.shipping_address?.address || '' }
-            ]
-          }])
+          body: JSON.stringify([])
         };
       }
 
@@ -913,63 +900,10 @@ exports.handler = async (event, context) => {
 
       if (isCityEmpty) {
         console.log('[API] Город не указан → возвращаем заглушку');
-        const price = calculatePrice(totalWeight);
-        const placeholderTariff = [{
-          id: 'pvz_enter_city',
-          tariff_id: 'pvz_enter_city',
-          shipping_company_handle: 'autolight_express',
-          price,
-          currency: 'BYN',
-          title: 'Доставка в пункт выдачи',
-          description: 'Укажите населённый пункт, чтобы увидеть адреса',
-          delivery_interval: {
-            min_days: 1,
-            max_days: 1,
-            description: '1 день'
-          },
-          shipping_address: {
-            full_locality_name: '',
-            address: '',
-            city: '',
-            country: 'Беларусь',
-            postal_code: '',
-            pickup_point_name: '',
-            pickup_point_hours: ''
-          },
-          fields_values: [
-            {
-              handle: 'shipping_address[full_locality_name]',
-              value: '',
-              name: 'Полный адрес доставки'
-            },
-            {
-              handle: 'shipping_address[address]',
-              value: '',
-              name: 'Адрес доставки'
-            },
-            {
-              handle: 'shipping_address_address',
-              value: ''
-            },
-            {
-              handle: 'full_locality_name',
-              value: ''
-            },
-            {
-              handle: 'address',
-              value: ''
-            },
-            {
-              handle: 'pickup_point_hint',
-              value: 'Укажите населённый пункт, чтобы выбрать адрес'
-            }
-          ]
-        }];
-
         return {
           statusCode: 200,
           headers: CORS_HEADERS,
-          body: JSON.stringify(placeholderTariff)
+          body: JSON.stringify([])
         };
       }
 
