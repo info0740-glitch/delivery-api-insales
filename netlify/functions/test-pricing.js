@@ -104,6 +104,10 @@ function calculatePickupPrice(weight, maxWeight = 50) {
   };
 }
 
+function roundToWholeRubles(value) {
+  return Math.round(value);
+}
+
 function calculateAdditionalFees(baseDeliveryPrice, orderSum, isRural, parcelsCount = 1) {
   const orderAmount = parseFloat(orderSum) || 0;
   const basePrice = parseFloat(baseDeliveryPrice) || 0;
@@ -112,14 +116,24 @@ function calculateAdditionalFees(baseDeliveryPrice, orderSum, isRural, parcelsCo
   const declaredValueFee = Math.max(0.30, orderAmount * 0.003);
   const codFee = Math.max(0.35, (orderAmount + basePrice) * 0.015);
   const ruralSurcharge = isRural ? (5.00 * numParcels) : 0;
-  const totalPrice = basePrice + declaredValueFee + codFee + ruralSurcharge;
+  
+  // Прогрессивная надбавка для маленьких заказов
+  let smallOrderSurcharge = 0;
+  if (orderAmount < 50) {
+    smallOrderSurcharge = 10.00;
+  } else if (orderAmount < 80) {
+    smallOrderSurcharge = 5.00;
+  }
+  
+  const totalPrice = basePrice + declaredValueFee + codFee + ruralSurcharge + smallOrderSurcharge;
   
   return {
-    basePrice: Math.round(basePrice * 100) / 100,
-    declaredValueFee: Math.round(declaredValueFee * 100) / 100,
-    codFee: Math.round(codFee * 100) / 100,
-    ruralSurcharge: Math.round(ruralSurcharge * 100) / 100,
-    totalPrice: Math.round(totalPrice * 100) / 100,
+    basePrice: roundToWholeRubles(basePrice),
+    declaredValueFee: roundToWholeRubles(declaredValueFee),
+    codFee: roundToWholeRubles(codFee),
+    ruralSurcharge: roundToWholeRubles(ruralSurcharge),
+    smallOrderSurcharge: roundToWholeRubles(smallOrderSurcharge),
+    totalPrice: roundToWholeRubles(totalPrice),
     parcelsCount: numParcels
   };
 }
@@ -203,6 +217,39 @@ console.log(`Вес: 60 кг, Сумма: 400 BYN, ПВЗ лимит: 30 кг`);
 console.log(`ПВЗ: базовая ${test7Pvz.price} BYN, посылок: ${test7Pvz.parcelsCount}, разбивка: ${test7Pvz.parcels.join(' кг + ')} кг`);
 console.log(`Сборы: объявл.ценность ${test7PvzFees.declaredValueFee}, налож.платеж ${test7PvzFees.codFee}, сельская ${test7PvzFees.ruralSurcharge}`);
 console.log(`ИТОГО: ${test7PvzFees.totalPrice} BYN`);
+
+// Тест 8: Маленький заказ 40 BYN (надбавка +10 BYN)
+console.log('\n📦 ТЕСТ 8: Маленький заказ 40 BYN (надбавка +10 BYN)');
+console.log('-'.repeat(80));
+const test8Courier = calculateCourierPrice(2);
+const test8Fees = calculateAdditionalFees(test8Courier.price, 40, false, test8Courier.parcelsCount);
+console.log(`Вес: 2 кг, Сумма: 40 BYN, Город`);
+console.log(`Курьер: базовая ${test8Courier.price} BYN, посылок: ${test8Courier.parcelsCount}`);
+console.log(`Сборы: объявл.ценность ${test8Fees.declaredValueFee}, налож.платеж ${test8Fees.codFee}, сельская ${test8Fees.ruralSurcharge}, маленький заказ ${test8Fees.smallOrderSurcharge}`);
+console.log(`ИТОГО: ${test8Fees.totalPrice} BYN`);
+console.log(`💡 Надбавка за маленький заказ < 50 BYN = +10 BYN`);
+
+// Тест 9: Средний заказ 70 BYN (надбавка +5 BYN)
+console.log('\n📦 ТЕСТ 9: Средний заказ 70 BYN (надбавка +5 BYN)');
+console.log('-'.repeat(80));
+const test9Courier = calculateCourierPrice(3);
+const test9Fees = calculateAdditionalFees(test9Courier.price, 70, false, test9Courier.parcelsCount);
+console.log(`Вес: 3 кг, Сумма: 70 BYN, Город`);
+console.log(`Курьер: базовая ${test9Courier.price} BYN, посылок: ${test9Courier.parcelsCount}`);
+console.log(`Сборы: объявл.ценность ${test9Fees.declaredValueFee}, налож.платеж ${test9Fees.codFee}, сельская ${test9Fees.ruralSurcharge}, маленький заказ ${test9Fees.smallOrderSurcharge}`);
+console.log(`ИТОГО: ${test9Fees.totalPrice} BYN`);
+console.log(`💡 Надбавка за заказ 50-80 BYN = +5 BYN`);
+
+// Тест 10: Нормальный заказ 100 BYN (без надбавки)
+console.log('\n📦 ТЕСТ 10: Нормальный заказ 100 BYN (без надбавки за размер)');
+console.log('-'.repeat(80));
+const test10Courier = calculateCourierPrice(5);
+const test10Fees = calculateAdditionalFees(test10Courier.price, 100, false, test10Courier.parcelsCount);
+console.log(`Вес: 5 кг, Сумма: 100 BYN, Город`);
+console.log(`Курьер: базовая ${test10Courier.price} BYN, посылок: ${test10Courier.parcelsCount}`);
+console.log(`Сборы: объявл.ценность ${test10Fees.declaredValueFee}, налож.платеж ${test10Fees.codFee}, сельская ${test10Fees.ruralSurcharge}, маленький заказ ${test10Fees.smallOrderSurcharge}`);
+console.log(`ИТОГО: ${test10Fees.totalPrice} BYN`);
+console.log(`💡 Заказ >= 80 BYN - без надбавки за размер заказа`);
 
 console.log('\n' + '='.repeat(80));
 console.log('ТЕСТИРОВАНИЕ ЗАВЕРШЕНО');

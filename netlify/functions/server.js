@@ -683,6 +683,16 @@ function calculatePrice(weight, maxWeight = 50) {
 }
 
 /**
+ * Округление до целых рублей (без копеек)
+ * Математическое округление: < 0.50 вниз, ≥ 0.50 вверх
+ * @param {number} value - значение для округления
+ * @returns {number} - округленное значение
+ */
+function roundToWholeRubles(value) {
+  return Math.round(value);
+}
+
+/**
  * Рассчитывает дополнительные сборы для доставки
  * @param {number} baseDeliveryPrice - базовая стоимость доставки
  * @param {number} orderSum - общая стоимость заказа (товары)
@@ -707,15 +717,26 @@ function calculateAdditionalFees(baseDeliveryPrice, orderSum, isRural, parcelsCo
   // Платится за каждую посылку
   const ruralSurcharge = isRural ? (5.00 * numParcels) : 0;
   
+  // Прогрессивная надбавка для маленьких заказов (скрытая от клиента)
+  // Компенсирует стоимость упаковки и обработки
+  let smallOrderSurcharge = 0;
+  if (orderAmount < 50) {
+    smallOrderSurcharge = 10.00; // < 50 BYN: +10 BYN
+  } else if (orderAmount < 80) {
+    smallOrderSurcharge = 5.00;  // 50-80 BYN: +5 BYN
+  }
+  // >= 80 BYN: без надбавки
+  
   // Итоговая стоимость доставки
-  const totalPrice = basePrice + declaredValueFee + codFee + ruralSurcharge;
+  const totalPrice = basePrice + declaredValueFee + codFee + ruralSurcharge + smallOrderSurcharge;
   
   return {
-    basePrice: Math.round(basePrice * 100) / 100,
-    declaredValueFee: Math.round(declaredValueFee * 100) / 100,
-    codFee: Math.round(codFee * 100) / 100,
-    ruralSurcharge: Math.round(ruralSurcharge * 100) / 100,
-    totalPrice: Math.round(totalPrice * 100) / 100,
+    basePrice: roundToWholeRubles(basePrice),
+    declaredValueFee: roundToWholeRubles(declaredValueFee),
+    codFee: roundToWholeRubles(codFee),
+    ruralSurcharge: roundToWholeRubles(ruralSurcharge),
+    smallOrderSurcharge: roundToWholeRubles(smallOrderSurcharge),
+    totalPrice: roundToWholeRubles(totalPrice),
     parcelsCount: numParcels
   };
 }
