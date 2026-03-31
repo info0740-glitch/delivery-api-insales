@@ -42,35 +42,93 @@ function loadCourierPricing() {
   }
 }
 
-// Расчет стоимости курьерской доставки по весу
+/**
+ * Расчет стоимости одной посылки по весу (Дверь-Дверь, Зона 4)
+ * Максимальный вес одной посылки: 50 кг
+ * Тарифы от 15.12.2025, Автолайт Экспресс, eCommerce Standard
+ */
+function getCourierPriceForSingleParcel(weight) {
+  const w = parseFloat(weight) || 0;
+  // Тарифы Зона 4 (Дверь-Дверь) - зона отправки
+  if (w <= 1) return 12.90;
+  if (w <= 2) return 14.70;
+  if (w <= 3) return 16.40;
+  if (w <= 5) return 18.20;
+  if (w <= 10) return 21.60;
+  if (w <= 15) return 25.40;
+  if (w <= 20) return 28.90;
+  if (w <= 25) return 32.10;
+  if (w <= 30) return 33.80;
+  if (w <= 35) return 36.10;
+  if (w <= 40) return 38.50;
+  if (w <= 45) return 40.60;
+  if (w <= 50) return 42.80;
+  // Более 50 кг - недопустимо для одной посылки
+  return 42.80;
+}
+
+/**
+ * Расчет стоимости курьерской доставки с учетом разделения на несколько посылок
+ * Максимальный вес одной посылки: 50 кг
+ * Стратегия: максимально загружаем каждую посылку до 50 кг, остаток - отдельная посылка
+ * Пример: 75 кг = 50 кг + 25 кг (2 посылки)
+ */
 function calculateCourierPrice(weight) {
   const pricing = loadCourierPricing();
   if (pricing && pricing.weight_pricing && pricing.weight_pricing.length > 0) {
     const weightKg = parseFloat(weight) || 0;
     for (const tier of pricing.weight_pricing) {
       if (weightKg <= tier.max_weight) {
-        return { price: tier.price, currency: pricing.currency || 'BYN', pricing };
+        return { price: tier.price, currency: pricing.currency || 'BYN', pricing, parcelsCount: 1, parcels: [weightKg] };
       }
     }
-    // Свыше максимального значения таблицы — oversized
     if (pricing.oversized_pricing) {
       const maxTier = pricing.weight_pricing[pricing.weight_pricing.length - 1];
       const extra = Math.max(0, weightKg - maxTier.max_weight);
       const price = pricing.oversized_pricing.base_price + extra * pricing.oversized_pricing.price_per_kg;
-      return { price: Math.round(price * 100) / 100, currency: pricing.currency || 'BYN', pricing };
+      return { price: Math.round(price * 100) / 100, currency: pricing.currency || 'BYN', pricing, parcelsCount: 1, parcels: [weightKg] };
     }
   }
-  // Дефолтные тарифы (fallback)
-  const w = parseFloat(weight) || 0;
-  if (w <= 1) return { price: 13, currency: 'BYN', pricing: null };
-  if (w <= 2) return { price: 14, currency: 'BYN', pricing: null };
-  if (w <= 3) return { price: 17, currency: 'BYN', pricing: null };
-  if (w <= 5) return { price: 19, currency: 'BYN', pricing: null };
-  if (w <= 10) return { price: 22, currency: 'BYN', pricing: null };
-  if (w <= 20) return { price: 29, currency: 'BYN', pricing: null };
-  if (w <= 30) return { price: 34, currency: 'BYN', pricing: null };
-  if (w <= 50) return { price: 43, currency: 'BYN', pricing: null };
-  return { price: 43 + Math.ceil((w - 50)) * 1, currency: 'BYN', pricing: null };
+  
+  const totalWeight = parseFloat(weight) || 0;
+  const MAX_PARCEL_WEIGHT = 50;
+  
+  // Если вес <= 50 кг - одна посылка
+  if (totalWeight <= MAX_PARCEL_WEIGHT) {
+    const price = getCourierPriceForSingleParcel(totalWeight);
+    return { price, currency: 'BYN', pricing: null, parcelsCount: 1, parcels: [totalWeight] };
+  }
+  
+  // Если вес > 50 кг - максимально загружаем посылки по 50 кг
+  const fullParcels = Math.floor(totalWeight / MAX_PARCEL_WEIGHT); // количество полных посылок по 50 кг
+  const remainder = totalWeight - (fullParcels * MAX_PARCEL_WEIGHT); // остаток
+  
+  let totalPrice = 0;
+  let parcels = [];
+  
+  // Добавляем полные посылки по 50 кг
+  for (let i = 0; i < fullParcels; i++) {
+    totalPrice += getCourierPriceForSingleParcel(MAX_PARCEL_WEIGHT);
+    parcels.push(MAX_PARCEL_WEIGHT);
+  }
+  
+  // Добавляем остаток (если есть)
+  if (remainder > 0) {
+    totalPrice += getCourierPriceForSingleParcel(remainder);
+    parcels.push(Math.round(remainder * 100) / 100);
+  }
+  
+  const parcelsCount = parcels.length;
+  
+  console.log(`[COURIER] Вес ${totalWeight}кг разделен на ${parcelsCount} посылок: ${parcels.join(' кг + ')} кг, итого: ${totalPrice.toFixed(2)} BYN`);
+  
+  return { 
+    price: Math.round(totalPrice * 100) / 100, 
+    currency: 'BYN', 
+    pricing: null, 
+    parcelsCount,
+    parcels
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -550,22 +608,116 @@ function findBestCityMatch(inputCity, pickupPoints) {
   return [];
 }
 
-// Расчет стоимости доставки по весу
-function calculatePrice(weight) {
-  // Новые тарифы на основе актуальной информации
-  if (weight <= 5.0) return 10.0;
-  if (weight <= 10.0) return 12.0;
-  if (weight <= 20.0) return 14.0;
-  if (weight <= 30.0) return 16.0;
-  if (weight <= 35.0) return 18.0;
-  if (weight <= 40.0) return 20.0;
-  if (weight <= 55.0) return 35.0;
-  if (weight <= 90.0) return 50.0;
-  if (weight <= 120.0) return 60.0;
-  if (weight <= 149.0) return 70.0;
-  if (weight <= 200.0) return 100.0;
-  if (weight <= 250.0) return 150.0;
-  return 200.0; // Для веса свыше 250 кг
+/**
+ * Расчет стоимости одной посылки для ПВЗ по весу (Дверь-Отделение, Зона 4)
+ * Тарифы от 15.12.2025, Автолайт Экспресс, eCommerce Standard
+ * Дверь-Отделение = от адреса отправителя до ПВЗ получателя
+ */
+function getPickupPriceForSingleParcel(weight) {
+  const w = parseFloat(weight) || 0;
+  // Тарифы Зона 4 (Дверь-Отделение)
+  if (w <= 1) return 9.90;
+  if (w <= 2) return 10.60;
+  if (w <= 3) return 11.70;
+  if (w <= 5) return 12.70;
+  if (w <= 10) return 14.80;
+  if (w <= 15) return 15.70;
+  if (w <= 20) return 16.60;
+  if (w <= 25) return 17.70;
+  if (w <= 30) return 19.80;
+  if (w <= 35) return 22.40;
+  if (w <= 40) return 25.60;
+  if (w <= 45) return 27.60;
+  if (w <= 50) return 29.50;
+  return 29.50;
+}
+
+/**
+ * Расчет стоимости доставки в ПВЗ с учетом ограничения по весу
+ * Стратегия: максимально загружаем каждую посылку до лимита ПВЗ, остаток - отдельная посылка
+ * Пример: 60 кг при лимите 30 кг = 30 кг + 30 кг (2 посылки)
+ * Пример: 35 кг при лимите 30 кг = 30 кг + 5 кг (2 посылки)
+ * 
+ * @param {number} weight - общий вес заказа
+ * @param {number} maxWeight - максимальный вес для данного ПВЗ (30 или 50 кг)
+ * @returns {object} - цена и количество посылок
+ */
+function calculatePrice(weight, maxWeight = 50) {
+  const totalWeight = parseFloat(weight) || 0;
+  const weightLimit = parseFloat(maxWeight) || 50;
+  
+  // Если вес укладывается в лимит ПВЗ - одна посылка
+  if (totalWeight <= weightLimit) {
+    const price = getPickupPriceForSingleParcel(totalWeight);
+    return { price, parcelsCount: 1, parcels: [totalWeight] };
+  }
+  
+  // Если вес превышает лимит - максимально загружаем посылки до лимита
+  const fullParcels = Math.floor(totalWeight / weightLimit); // количество полных посылок
+  const remainder = totalWeight - (fullParcels * weightLimit); // остаток
+  
+  let totalPrice = 0;
+  let parcels = [];
+  
+  // Добавляем полные посылки по максимальному весу
+  for (let i = 0; i < fullParcels; i++) {
+    totalPrice += getPickupPriceForSingleParcel(weightLimit);
+    parcels.push(weightLimit);
+  }
+  
+  // Добавляем остаток (если есть)
+  if (remainder > 0) {
+    totalPrice += getPickupPriceForSingleParcel(remainder);
+    parcels.push(Math.round(remainder * 100) / 100);
+  }
+  
+  const parcelsCount = parcels.length;
+  
+  console.log(`[PVZ] Вес ${totalWeight}кг, лимит ${weightLimit}кг → ${parcelsCount} посылок: ${parcels.join(' кг + ')} кг, итого: ${totalPrice.toFixed(2)} BYN`);
+  
+  return { 
+    price: Math.round(totalPrice * 100) / 100, 
+    parcelsCount,
+    parcels
+  };
+}
+
+/**
+ * Рассчитывает дополнительные сборы для доставки
+ * @param {number} baseDeliveryPrice - базовая стоимость доставки
+ * @param {number} orderSum - общая стоимость заказа (товары)
+ * @param {boolean} isRural - является ли населенный пункт сельским
+ * @param {number} parcelsCount - количество посылок (по умолчанию 1)
+ * @returns {object} - объект с детализацией сборов
+ */
+function calculateAdditionalFees(baseDeliveryPrice, orderSum, isRural, parcelsCount = 1) {
+  const orderAmount = parseFloat(orderSum) || 0;
+  const basePrice = parseFloat(baseDeliveryPrice) || 0;
+  const numParcels = parseInt(parcelsCount) || 1;
+  
+  // Объявленная ценность: 0,3% от суммы заказа (минимум 0,30 BYN)
+  // Платится один раз на весь заказ, независимо от количества посылок
+  const declaredValueFee = Math.max(0.30, orderAmount * 0.003);
+  
+  // Наложенный платеж: 1,5% от (стоимость товара + стоимость доставки), минимум 0,35 BYN
+  // Платится один раз на весь заказ
+  const codFee = Math.max(0.35, (orderAmount + basePrice) * 0.015);
+  
+  // Надбавка за сельский населенный пункт: +5 BYN
+  // Платится за каждую посылку
+  const ruralSurcharge = isRural ? (5.00 * numParcels) : 0;
+  
+  // Итоговая стоимость доставки
+  const totalPrice = basePrice + declaredValueFee + codFee + ruralSurcharge;
+  
+  return {
+    basePrice: Math.round(basePrice * 100) / 100,
+    declaredValueFee: Math.round(declaredValueFee * 100) / 100,
+    codFee: Math.round(codFee * 100) / 100,
+    ruralSurcharge: Math.round(ruralSurcharge * 100) / 100,
+    totalPrice: Math.round(totalPrice * 100) / 100,
+    parcelsCount: numParcels
+  };
 }
 
 /**
@@ -641,9 +793,13 @@ exports.handler = async (event, context) => {
       const rawCity = fullLocalityName || locationCity || locationSettl || shippingCity;
 
       const totalWeight = parseFloat(order.total_weight || 0) || 0.5;
-      const { price, currency } = calculateCourierPrice(totalWeight);
+      const orderSum = parseFloat(order.total_price || order.items_price || 0) || 0;
+      const courierCalc = calculateCourierPrice(totalWeight);
+      const basePrice = courierCalc.price;
+      const currency = courierCalc.currency;
+      const parcelsCount = courierCalc.parcelsCount || 1;
 
-      console.log(`[COURIER] Запрос: город="${rawCity}", вес=${totalWeight}кг`);
+      console.log(`[COURIER] Запрос: город="${rawCity}", вес=${totalWeight}кг, сумма заказа=${orderSum} BYN`);
 
       // Город не указан — заглушка
       if (!rawCity || !rawCity.trim()) {
@@ -656,6 +812,8 @@ exports.handler = async (event, context) => {
       }
 
       const zone = classifySettlement(rawCity);
+      const isRural = (zone === 'village');
+      
       // Пытаемся получить UTC offset: сначала из body (если фронтенд передал), затем из заголовков
       let utcOffset = requestBody?.utc_offset;
       if (!utcOffset && utcOffset !== 0) {
@@ -663,7 +821,13 @@ exports.handler = async (event, context) => {
       }
       const dateInfo = calcDeliveryDate(zone, utcOffset);
 
-      console.log(`[COURIER] Зона: ${zone}, дата: ${dateInfo.description}, цена: ${price} BYN`);
+      // Рассчитываем полную стоимость с учетом всех сборов
+      const fees = calculateAdditionalFees(basePrice, orderSum, isRural, parcelsCount);
+      const finalPrice = fees.totalPrice;
+
+      console.log(`[COURIER] Зона: ${zone}, сельский: ${isRural}, посылок: ${parcelsCount}, базовая цена: ${basePrice} BYN`);
+      console.log(`[COURIER] Сборы - объявл.ценность: ${fees.declaredValueFee}, налож.платеж: ${fees.codFee}, сельская надбавка: ${fees.ruralSurcharge}`);
+      console.log(`[COURIER] Итоговая цена: ${finalPrice} BYN, дата: ${dateInfo.description}`);
 
        // Формируем описание в зависимости от зоны
        // UX: эмодзи = быстрая идентификация, время = ключевое ожидание клиента, без лишней классификации
@@ -679,6 +843,12 @@ exports.handler = async (event, context) => {
         village:  'Курьер до двери (1–2 дня)'
       };
 
+      // Добавляем информацию о количестве посылок, если их больше одной
+      let parcelsInfo = '';
+      if (parcelsCount > 1) {
+        parcelsInfo = ` • Заказ будет разделён на ${parcelsCount} посылки`;
+      }
+
       // Генерируем SVG-календарь для визуализации сроков доставки
       const deliverySvg = generateDeliverySvg(dateInfo);
 
@@ -688,10 +858,10 @@ exports.handler = async (event, context) => {
       const tariff = {
         tariff_id: `courier_door_${zone}`,
         shipping_company_handle: 'autolight_express',
-        price,
+        price: finalPrice,
         currency,
-        title: zoneTitles[zone],
-        description: zoneDescriptions[zone],
+        title: zoneTitles[zone] + (parcelsCount > 1 ? ` (${parcelsCount} посылки)` : ''),
+        description: zoneDescriptions[zone] + parcelsInfo,
         delivery_interval: {
           min_days: dateInfo.min_days,
           max_days: dateInfo.max_days,
@@ -711,7 +881,13 @@ exports.handler = async (event, context) => {
           { handle: 'country', value: 'Беларусь' },
           { handle: 'delivery_zone', value: zone },
           { handle: 'delivery_date', value: dateInfo.description },
-          { handle: 'delivery_svg', value: deliverySvg }
+          { handle: 'delivery_svg', value: deliverySvg },
+          { handle: 'base_price', value: `${fees.basePrice} BYN` },
+          { handle: 'declared_value_fee', value: `${fees.declaredValueFee} BYN` },
+          { handle: 'cod_fee', value: `${fees.codFee} BYN` },
+          { handle: 'rural_surcharge', value: `${fees.ruralSurcharge} BYN` },
+          { handle: 'parcels_count', value: parcelsCount.toString() },
+          { handle: 'parcels_breakdown', value: courierCalc.parcels ? courierCalc.parcels.join(' кг + ') + ' кг' : `${totalWeight} кг` }
         ]
       };
 
@@ -803,22 +979,35 @@ exports.handler = async (event, context) => {
       }
 
       const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
-      const price = calculatePrice(weight);
+      
+      // Для виджета на странице товара у нас нет суммы заказа, поэтому используем примерную среднюю сумму
+      // или минимальные сборы
+      const estimatedOrderSum = 100; // примерная средняя сумма заказа для расчета
+      const zone = city ? classifySettlement(city) : 'district';
+      const isRural = (zone === 'village');
+      
+      console.log(`[PICKUP] Найдено ПВЗ: ${points.length}, зона: ${zone}, сельский: ${isRural}`);
 
-      console.log(`[PICKUP] Найдено ПВЗ: ${points.length}`);
-
-      const result = points.map(point => ({
-        id: point.id,
-        title: point.name,
-        address: point.address,
-        price,
-        currency: 'BYN',
-        working_hours: point.working_hours,
-        shipping_address: {
-          city: point.city,
-          address: point.address
-        }
-      }));
+      const result = points.map(point => {
+        const weightLimit = point.weight_limit || 50;
+        const priceCalc = calculatePrice(weight, weightLimit);
+        const fees = calculateAdditionalFees(priceCalc.price, estimatedOrderSum, isRural, priceCalc.parcelsCount);
+        
+        return {
+          id: point.id,
+          title: point.name,
+          address: point.address,
+          price: fees.totalPrice,
+          currency: 'BYN',
+          working_hours: point.working_hours,
+          shipping_address: {
+            city: point.city,
+            address: point.address
+          },
+          parcels_count: priceCalc.parcelsCount,
+          weight_limit: weightLimit
+        };
+      });
 
       return {
         statusCode: 200,
@@ -886,9 +1075,10 @@ exports.handler = async (event, context) => {
        const city = fullLocalityName || locationCity || locationSettlement || shippingCity;
        const isCityEmpty = !city || !city.trim();
 
-       // Получаем вес заказа
+       // Получаем вес заказа и сумму
        const totalWeightStr = order.total_weight || '0';
        const totalWeight = parseFloat(totalWeightStr) || 0;
+       const orderSum = parseFloat(order.total_price || order.items_price || 0) || 0;
        
        // Получаем UTC смещение: сначала из body, затем пытаемся определить из заголовков
        let utcOffset = requestBody?.utc_offset;
@@ -896,7 +1086,7 @@ exports.handler = async (event, context) => {
          utcOffset = detectUtcOffsetFromHeaders(event.headers);
        }
 
-       console.log(`[API] Запрос ПВЗ: город="${city}", вес=${totalWeight}кг, UTC offset=${utcOffset}`);
+       console.log(`[API] Запрос ПВЗ: город="${city}", вес=${totalWeight}кг, сумма=${orderSum} BYN, UTC offset=${utcOffset}`);
 
       if (isCityEmpty) {
         console.log('[API] Город не указан → возвращаем заглушку');
@@ -928,30 +1118,41 @@ exports.handler = async (event, context) => {
        // ПВЗ найдены — определяем зону для расчёта даты
        // ПВЗ есть только в городах → zone всегда district или minsk_oblast
        const pvzZone = classifySettlement(city);
+       const isPvzRural = (pvzZone === 'village');
+       
        // utcOffset уже определён выше, просто переиспользуем
        const pvzDateInfo = calcDeliveryDate(pvzZone, utcOffset);
 
-       console.log(`[API] ПВЗ найдены, зона: ${pvzZone}, доставка: ${pvzDateInfo.description}`);
+       console.log(`[API] ПВЗ найдены, зона: ${pvzZone}, сельский: ${isPvzRural}, доставка: ${pvzDateInfo.description}`);
 
       // Генерируем SVG для ПВЗ
       const pvzDeliverySvg = generateDeliverySvg(pvzDateInfo);
 
        const tariffs = filteredPoints.map(point => {
-          const price = calculatePrice(totalWeight);
+          const weightLimit = point.weight_limit || 50; // По умолчанию 50 кг
+          const priceCalc = calculatePrice(totalWeight, weightLimit);
+          const fees = calculateAdditionalFees(priceCalc.price, orderSum, isPvzRural, priceCalc.parcelsCount);
+          const finalPrice = fees.totalPrice;
+          
           const fullAddress = point.delivery_address ||
                              `${point.address}, ${point.city}, Беларусь`;
+
+          // Информация о количестве посылок
+          const parcelsNote = priceCalc.parcelsCount > 1 
+            ? ` • Заказ разделён на ${priceCalc.parcelsCount} посылки` 
+            : '';
 
           return {
             id: point.id,
             tariff_id: `pvz_${point.id}`,
             shipping_company_handle: 'autolight_express',
-            price,
+            price: finalPrice,
             currency: 'BYN',
 
             // UX: адрес в заголовке — главное что нужно клиенту
-            title: `🏪 ${point.address}`,
+            title: `🏪 ${point.address}` + (priceCalc.parcelsCount > 1 ? ` (${priceCalc.parcelsCount} посылки)` : ''),
             // UX: описание показывает тип пункта и ТК вместо часов работы (часы в shipping_address)
-            description: `🚚 Автолайт экспресс • Пункт самовывоза`,
+            description: `🚚 Автолайт экспресс • Пункт самовывоза${parcelsNote}`,
 
           delivery_interval: {
             min_days: pvzDateInfo.min_days,
@@ -981,7 +1182,13 @@ exports.handler = async (event, context) => {
             { handle: 'country', value: 'Беларусь' },
             { handle: 'pickup_point_hours', value: point.working_hours },
             { handle: 'delivery_date', value: pvzDateInfo.description },
-            { handle: 'delivery_svg', value: pvzDeliverySvg }
+            { handle: 'delivery_svg', value: pvzDeliverySvg },
+            { handle: 'base_price', value: `${fees.basePrice} BYN` },
+            { handle: 'declared_value_fee', value: `${fees.declaredValueFee} BYN` },
+            { handle: 'cod_fee', value: `${fees.codFee} BYN` },
+            { handle: 'rural_surcharge', value: `${fees.ruralSurcharge} BYN` },
+            { handle: 'parcels_count', value: priceCalc.parcelsCount.toString() },
+            { handle: 'parcels_breakdown', value: priceCalc.parcels ? priceCalc.parcels.join(' кг + ') + ' кг' : '' }
           ]
         };
       });
