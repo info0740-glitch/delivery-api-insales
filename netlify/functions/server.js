@@ -50,21 +50,21 @@ function loadCourierPricing() {
 function getCourierPriceForSingleParcel(weight) {
   const w = parseFloat(weight) || 0;
   // Тарифы Зона 4 (Дверь-Дверь) - зона отправки
-  if (w <= 1) return 12.90;
-  if (w <= 2) return 14.70;
-  if (w <= 3) return 16.40;
-  if (w <= 5) return 18.20;
-  if (w <= 10) return 21.60;
-  if (w <= 15) return 25.40;
-  if (w <= 20) return 28.90;
-  if (w <= 25) return 32.10;
-  if (w <= 30) return 33.80;
-  if (w <= 35) return 36.10;
-  if (w <= 40) return 38.50;
-  if (w <= 45) return 40.60;
-  if (w <= 50) return 42.80;
+  if (w <= 1) return 14.80;
+  if (w <= 2) return 16.40;
+  if (w <= 3) return 17.10;
+  if (w <= 5) return 20.00;
+  if (w <= 10) return 23.30;
+  if (w <= 15) return 26.60;
+  if (w <= 20) return 29.80;
+  if (w <= 25) return 33.10;
+  if (w <= 30) return 36.40;
+  if (w <= 35) return 43.80;
+  if (w <= 40) return 45.60;
+  if (w <= 45) return 48.30;
+  if (w <= 50) return 50.20;
   // Более 50 кг - недопустимо для одной посылки
-  return 42.80;
+  return 50.20;
 }
 
 /**
@@ -616,20 +616,20 @@ function findBestCityMatch(inputCity, pickupPoints) {
 function getPickupPriceForSingleParcel(weight) {
   const w = parseFloat(weight) || 0;
   // Тарифы Зона 4 (Дверь-Отделение)
-  if (w <= 1) return 9.90;
-  if (w <= 2) return 10.60;
-  if (w <= 3) return 11.70;
-  if (w <= 5) return 12.70;
-  if (w <= 10) return 14.80;
-  if (w <= 15) return 15.70;
-  if (w <= 20) return 16.60;
-  if (w <= 25) return 17.70;
-  if (w <= 30) return 19.80;
-  if (w <= 35) return 22.40;
-  if (w <= 40) return 25.60;
-  if (w <= 45) return 27.60;
-  if (w <= 50) return 29.50;
-  return 29.50;
+  if (w <= 1) return 10.20;
+  if (w <= 2) return 10.90;
+  if (w <= 3) return 11.80;
+  if (w <= 5) return 12.80;
+  if (w <= 10) return 15.10;
+  if (w <= 15) return 18.40;
+  if (w <= 20) return 20.90;
+  if (w <= 25) return 23.30;
+  if (w <= 30) return 26.60;
+  if (w <= 35) return 30.00;
+  if (w <= 40) return 32.40;
+  if (w <= 45) return 34.80;
+  if (w <= 50) return 36.30;
+  return 36.30;
 }
 
 /**
@@ -713,9 +713,9 @@ function calculateAdditionalFees(baseDeliveryPrice, orderSum, isRural, parcelsCo
   // Платится один раз на весь заказ
   const codFee = Math.max(0.35, (orderAmount + basePrice) * 0.015);
   
-  // Надбавка за сельский населенный пункт: +5 BYN
+  // Надбавка за сельский населенный пункт (не в основной сети): +9 BYN
   // Платится за каждую посылку
-  const ruralSurcharge = isRural ? (5.00 * numParcels) : 0;
+  const ruralSurcharge = isRural ? (9.00 * numParcels) : 0;
   
   // Прогрессивная надбавка для маленьких заказов (скрытая от клиента)
   // Компенсирует стоимость упаковки и обработки
