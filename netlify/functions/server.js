@@ -215,6 +215,35 @@ console.log(`[ZONES] District: ${deliveryZones.district.length} городов`)
 // Поддерживаем варианты с точкой («д.») и без точки («д ») — InSales присылает оба формата
 const VILLAGE_PREFIXES = /^(д\.?|дер\.?|деревня|аг\.?|агрогородок|пос\.?|поселок|посёлок|хутор|х\.?)\s+/i;
 
+// Шаблон для обнаружения упоминания населённого пункта ВНУТРИ строки адреса.
+// Покрывает случаи «д. Деревня», «д Терюха, ул.», «аг. Жуки» и т.п.
+// Группа 1 — сам префикс, группа 2 — название населённого пункта (до запятой/точки/конца).
+const VILLAGE_IN_ADDRESS_RE = /(?:^|[,;\s])(д\.?\s+|дер\.?\s+|деревня\s+|аг\.?\s+|агрогородок\s+|пос\.?\s+|поселок\s+|посёлок\s+|хутор\s+|х\.?\s+)([а-яёА-ЯЁa-zA-Z][а-яёА-ЯЁ\w\-]+)/i;
+
+/**
+ * Ищет в строке адреса покупателя упоминание сельского населённого пункта.
+ * Возвращает строку вида «д. Терюха» или null если ничего не найдено.
+ *
+ * Примеры, которые перехватит функция:
+ *   «д. Деревня Терюха, ул. Лесная, 15»  → «д. Терюха»
+ *   «аг. Жуки, ул. Центральная, 3»        → «аг. Жуки»
+ *   «пос. Колодищи, д.5»                  → «пос. Колодищи»
+ *
+ * НЕ перехватит (только улица, без населённого пункта):
+ *   «ул. Лесная, 15»
+ *   «пр-т Независимости, 100»
+ */
+function extractSettlementFromAddress(address) {
+  if (!address || !address.trim()) return null;
+  const m = VILLAGE_IN_ADDRESS_RE.exec(address);
+  if (!m) return null;
+  const prefix = m[1].trim();
+  const name   = m[2].trim();
+  const result = `${prefix} ${name}`;
+  console.log(`[ADDRESS_CHECK] В строке адреса обнаружен населённый пункт: "${result}" (исходник: "${address}")`);
+  return result;
+}
+
 /**
  * Нормализует название населённого пункта для сравнения:
  * убирает префиксы «г.»/«г », «город», «д.»/«д », «аг.»/«аг » и т.п.,
@@ -832,7 +861,19 @@ exports.handler = async (event, context) => {
         };
       }
 
-      const zone = classifySettlement(rawCity);
+      // Проверяем строку адреса: покупатель мог указать деревню прямо в поле адреса
+      // (например, «д. Терюха, ул. Лесная, 15»), хотя в поле населённого пункта выбрал город.
+      // Если адрес содержит сельский префикс — переопределяем зону на village.
+      const currentAddress = order.shipping_address?.address || '';
+      const settlementInAddress = extractSettlementFromAddress(currentAddress);
+      let zone;
+      if (settlementInAddress) {
+        // Адресная строка содержит деревню/посёлок — применяем сельскую зону
+        zone = 'village';
+        console.log(`[COURIER] Зона переопределена → village из-за адреса: "${currentAddress}"`);
+      } else {
+        zone = classifySettlement(rawCity);
+      }
       const isRural = (zone === 'village');
       
       // Пытаемся получить UTC offset: сначала из body (если фронтенд передал), затем из заголовков
@@ -873,7 +914,6 @@ exports.handler = async (event, context) => {
       // Генерируем SVG-календарь для визуализации сроков доставки
       const deliverySvg = generateDeliverySvg(dateInfo);
 
-      const currentAddress = order.shipping_address?.address || '';
       const fullAddr = fullLocalityName || [rawCity, 'Беларусь'].filter(Boolean).join(', ');
 
       const tariff = {
