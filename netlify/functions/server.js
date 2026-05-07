@@ -1,6 +1,56 @@
 const fs = require('fs');
 const path = require('path');
 
+// ──────────────────────────────────────────────────────────────────────────
+// IN-MEMORY КЕШ ОТВЕТОВ
+// Снижает latency для повторных запросов с одинаковыми параметрами.
+// Инстанс Lambda живёт ~5-15 минут → кеш актуален пока инстанс жив.
+// TTL = 5 минут: цены и даты доставки не меняются чаще.
+// ──────────────────────────────────────────────────────────────────────────
+const _responseCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
+
+function getCacheKey(route, body) {
+  // Ключ: маршрут + нормализованное тело запроса (только значимые поля)
+  try {
+    const b = body || {};
+    const order = b.order || b;
+    const city = (
+      order?.shipping_address?.full_locality_name ||
+      order?.shipping_address?.location?.city ||
+      order?.shipping_address?.city ||
+      b?.address?.city || b?.city || ''
+    ).toLowerCase().trim();
+    const weight = parseFloat(order?.total_weight || b?.weight || 0).toFixed(2);
+    const price  = parseFloat(order?.total_price  || b?.items_price || 0).toFixed(0);
+    const addr   = (order?.shipping_address?.address || '').toLowerCase().trim();
+    return `${route}|${city}|${weight}|${price}|${addr}`;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getCached(key) {
+  if (!key) return null;
+  const entry = _responseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    _responseCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function setCache(key, value) {
+  if (!key) return;
+  // Ограничиваем размер кеша — не более 200 записей
+  if (_responseCache.size >= 200) {
+    const firstKey = _responseCache.keys().next().value;
+    _responseCache.delete(firstKey);
+  }
+  _responseCache.set(key, { ts: Date.now(), value });
+}
+
 // Загружаем пункты выдачи из встроенного модуля (для надежного деплоя на Netlify)
 let pickupPoints = [];
 try {
@@ -812,7 +862,12 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Accept, Accept-Language, Content-Language, Content-Type',
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json',
+  // Netlify Edge CDN кешируем на 5 минут (s-maxage),
+  // браузер не кеширует (no-store) — чтобы InSales всегда получал свежий расчёт.
+  // Netlify Durable Cache также включается через s-maxage.
+  'Cache-Control': 'no-store, s-maxage=300',
+  'Netlify-CDN-Cache-Control': 'public, s-maxage=300, stale-while-revalidate=60'
 };
 
 exports.handler = async (event, context) => {
@@ -834,6 +889,15 @@ exports.handler = async (event, context) => {
         const body = JSON.parse(event.body);
         requestBody = body;
         order = body.order || body || {};
+      }
+
+      // Проверяем кеш — пинг-запросы не кешируем
+      const isPing = requestBody?.action === 'ping' || requestBody?.['X-Keepalive'];
+      const cacheKey = isPing ? null : getCacheKey('courier-door', requestBody);
+      const cached = getCached(cacheKey);
+      if (cached) {
+        console.log(`[CACHE] HIT courier-door key="${cacheKey}"`);
+        return cached;
       }
 
       const fullLocalityName = order.shipping_address?.full_locality_name || '';
@@ -960,11 +1024,14 @@ exports.handler = async (event, context) => {
          });
        }
 
-      return {
+      const response = {
         statusCode: 200,
         headers: CORS_HEADERS,
         body: JSON.stringify([tariff])
       };
+      setCache(cacheKey, response);
+      console.log(`[CACHE] SET courier-door key="${cacheKey}"`);
+      return response;
     } catch (err) {
       return {
         statusCode: 500,
@@ -1018,8 +1085,10 @@ exports.handler = async (event, context) => {
     try {
       let city = '';
       let weight = 0;
+      let requestBodyPvz = {};
       if (event.body) {
         const body = JSON.parse(event.body);
+        requestBodyPvz = body;
         city = body.address?.city || body.city || '';
         weight = parseFloat((body.order && body.order.total_weight) || body.weight || 0) || 0;
       }
@@ -1037,6 +1106,14 @@ exports.handler = async (event, context) => {
             hint: 'Укажите населённый пункт, чтобы увидеть пункты выдачи'
           })
         };
+      }
+
+      // Проверяем кеш (город + вес — ключевые параметры для ПВЗ)
+      const pvzCacheKey = `pickup-points|${city.toLowerCase().trim()}|${parseFloat(weight).toFixed(2)}`;
+      const pvzCached = getCached(pvzCacheKey);
+      if (pvzCached) {
+        console.log(`[CACHE] HIT pickup-points key="${pvzCacheKey}"`);
+        return pvzCached;
       }
 
       const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
@@ -1070,11 +1147,14 @@ exports.handler = async (event, context) => {
         };
       });
 
-      return {
+      const pvzResponse = {
         statusCode: 200,
         headers: CORS_HEADERS,
         body: JSON.stringify(result)
       };
+      setCache(pvzCacheKey, pvzResponse);
+      console.log(`[CACHE] SET pickup-points key="${pvzCacheKey}"`);
+      return pvzResponse;
     } catch (err) {
       console.error(`[PICKUP] Ошибка: ${err.message}`);
       return {

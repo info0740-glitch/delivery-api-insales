@@ -30,6 +30,10 @@
   to = "/index.html"
   status = 200
 
+# Scheduled function: пингует API каждые 5 минут для предотвращения cold start
+[functions."keepalive"]
+  schedule = "*/5 * * * *"
+
 [dev]
   command = "npm run dev"
   port = 3000
