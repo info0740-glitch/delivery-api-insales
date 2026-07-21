@@ -20,3 +20,12 @@ node_modules/
 # Переменные окружения
 .env
 .env.local
+
+# Артефакты деплоя
+ycf-deploy.zip
+
+# Служебные директории IDE/плагинов
+.kilo/
+.playwright-mcp/
+.qwen/
+

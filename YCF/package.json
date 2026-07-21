@@ -1,0 +1,12 @@
+{
+  "name": "delivery-api-ycf",
+  "version": "1.0.0",
+  "description": "InSales Delivery API — Yandex Cloud Functions",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test-peak-surcharge.js && node test-data-loader.js && node test-handler.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0"
+  }
+}

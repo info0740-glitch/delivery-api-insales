@@ -6,10 +6,14 @@ API доставки для InSales. Рассчитывает стоимость
 
 ```
 YCF API Gateway → index.js → server.js
+                          ↓
+                    data-loader.js ← s3-client.js ← Yandex Object Storage
 ```
 
 - **`index.js`** — обёртка Yandex Cloud Functions. Преобразует YCF-формат событий в Netlify-формат.
 - **`server.js`** — вся бизнес-логика: кеширование, расчёт цен, дат, надбавок.
+- **`data-loader.js`** — загрузка справочников Автолайта (`autolight-cities.json`, `autolight-postoffices.json`) из Yandex Object Storage.
+- **`s3-client.js`** — AWS SDK v3 клиент для чтения из приватного бакета Yandex Object Storage.
 - **`checkout.liquid`** — фронтенд-шаблон чекаута InSales (не трогается бэкендом).
 
 ## Эндпоинты
@@ -23,7 +27,14 @@ YCF API Gateway → index.js → server.js
 
 | Переменная | Описание | Обязательная |
 |------------|----------|--------------|
-| `OVERRIDE_BUCKET` | Имя бакета Yandex Object Storage для `peak-override.json` | Нет (если не используется ручной override) |
+| `YCF_DATA_BUCKET` | Имя бакета Yandex Object Storage со справочниками Автолайта (`autolight-cities.json`, `autolight-postoffices.json`). Если не задан — используется `OVERRIDE_BUCKET` | Нет (но должен быть задан один из двух) |
+| `OVERRIDE_BUCKET` | Имя бакета Yandex Object Storage для `peak-override.json`; используется как fallback для справочников | Нет |
+| `CITIES_JSON_KEY` | Имя файла со справочником городов (по умолчанию `autolight-cities.json`) | Нет |
+| `POSTOFFICES_JSON_KEY` | Имя файла со справочником ПВЗ (по умолчанию `autolight-postoffices.json`) | Нет |
+| `AWS_ACCESS_KEY_ID` | Static key ID сервисного аккаунта для чтения из приватного бакета | Да (если бакет не публичный) |
+| `AWS_SECRET_ACCESS_KEY` | Static key secret сервисного аккаунта для чтения из приватного бакета | Да (если бакет не публичный) |
+
+Бакет остаётся **приватным**. Для чтения справочников и override используется AWS SDK v3 с static credentials сервисного аккаунта.
 
 ## Динамическая наценка (peak surcharge)
 
@@ -36,7 +47,7 @@ YCF API Gateway → index.js → server.js
 | ≥ 80 BYN | 0 | 0 |
 
 **Пиковый период:** с 12:00 пятницы до 13:00 вторника.  
-   Непиковый день заканчивается в субботу 12:00; после 12:00 субботы начинается пик.  
+   Непиковый день заканчивается в субботу 12:00; после 12:00 субботы начинается пик.  
 **Спад:** всё остальное время.
 
 Время определяется по локальному времени клиента (`utc_offset` из тела запроса или geoip-заголовков).
@@ -89,13 +100,29 @@ aws s3 cp peak-override.json s3://$OVERRIDE_BUCKET/peak-override.json \
 - response cache: до 60 сек  
 **Итого:** до ~90 секунд до полного применения.
 
+## Справочники Автолайт из Object Storage
+
+Стоимость/сроки доставки и список ПВЗ теперь строятся на основе актуальных данных из приватного бакета:
+
+- **`autolight-cities.json`** — справочник населённых пунктов.
+  - `inMainList: true` — пункт в основной сети Автолайта.
+    - Если `day6` (суббота) `true` — доставка работает Пн–Сб (`saturday`).
+    - Иначе — основная сеть Пн–Пт (`district`).
+  - `inMainList: false` (и нет рабочих дней) — пункт вне основной сети, применяется деревенская логика (надбавка + сроки Пн–Пт).
+  - Деревни/агрогородки в основной сети **не** получают сельскую надбавку, даже если в адресе есть префикс `д.` / `аг.` / `пос.`.
+
+- **`autolight-postoffices.json`** — справочник ПВЗ с актуальными адресами, режимом работы и лимитом веса.
+  - Почтоматы с адресами вида `CityPostXXX` исключаются из выдачи покупателю.
+
+Загрузчик (`data-loader.js`) кеширует справочники в памяти на 5 минут и использует single-flight, чтобы не ходить в Object Storage по нескольку раз на запрос. При недоступности бакета автоматически используются встроенные fallback-справочники (`zones-data.js`, `pickup-piont-data.js`).
+
 ## Оптимизации расчёта ПВЗ
 
 Чтобы избежать роста latency при большом количестве пунктов выдачи в городе:
 
 - **Группировка по `weight_limit`** — ПВЗ с одинаковым лимитом веса (например, все 30 кг в Минске) используют один расчёт `calculateAdditionalFees` вместо N вызовов.
 - **`resolvePeakStatus` вне цикла** — статус пика определяется 1 раз на запрос, а не для каждой точки.
-- **Single-flight для `loadPeakOverride`** — при промахе in-memory кеша все параллельные вызовы ждут один и тот же Promise с `fetch` к Object Storage. Исключает «шторм» из N одновременных HTTP-запросов.
+- **Single-flight для `loadPeakOverride`** — при промахе in-memory кеша все параллельные вызовы ждут один и тот же Promise с S3-запросом. Исключает «шторм» из N одновременных запросов.
 
 ## Кеширование
 
@@ -107,7 +134,11 @@ In-memory кеш ответов в `server.js`:
 ## Тесты
 
 ```bash
+npm test
+# или по отдельности:
 node test-peak-surcharge.js
+node test-data-loader.js
+node test-handler.js
 ```
 
 Покрывает:
@@ -116,32 +147,68 @@ node test-peak-surcharge.js
 - приоритет `force_off` над `force_peak`,
 - истёкшие override,
 - различие кеш-ключей для пик/спад,
-- single-flight `loadPeakOverride` (1 fetch при 10 параллельных вызовах),
+- single-flight `loadPeakOverride` (1 S3 call при 10 параллельных вызовах),
 - передача готового `peakStatus` в `calculateAdditionalFees`,
-- группировка ПВЗ по `weight_limit` (2 группы → 2 расчёта).
+- группировка ПВЗ по `weight_limit` (2 группы → 2 расчёта),
+- зонирование по справочнику Автолайт (`saturday` / `district` / `village`),
+- деревни с обслуживанием без сельской надбавки,
+- маппинг ПВЗ из `autolight-postoffices.json` в текущий формат,
+- исключение почтоматов `CityPostXXX` из выдачи,
+- fallback при недоступности бакета,
+- интеграционные проверки эндпоинтов `/api/courier-door` и `/api/pickup-points`.
 
 ## Настройка Yandex Object Storage (один раз)
 
 1. Создать бакет в [консоли YC](https://console.cloud.yandex.ru/).
-2. Сделать бакет **публичным на чтение** (или настроить сервисный аккаунт).
-3. Загрузить начальный `peak-override.json`:
+2. **Бакет остаётся приватным.** Создать сервисный аккаунт и выдать ему роли:
+   - `storage.viewer` — чтение справочников
+   - `storage.editor` — если нужна запись override/zip в бакет
+3. Создать static credentials для сервисного аккаунта:
+   ```bash
+   yc iam access-key create --service-account-id <service-account-id>
+   ```
+4. Загрузить начальный `peak-override.json`:
    ```bash
    echo '{"force_peak_until":null,"force_off_until":null,"reason":""}' > peak-override.json
    aws s3 cp peak-override.json s3://$OVERRIDE_BUCKET/peak-override.json \
      --endpoint-url=https://storage.yandexcloud.net
    ```
-4. Установить `OVERRIDE_BUCKET` в переменных окружения YCF.
+5. Установить переменные окружения YCF:
+   - `YCF_DATA_BUCKET`
+   - `OVERRIDE_BUCKET`
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
 
 ## Деплой
 
-1. Задеплоить функцию в Yandex Cloud Functions.
-2. Увеличить `execution_timeout` до **5 секунд** (рекомендуется для стабильности при сетевых флуктуациях):
+1. Убедиться, что в бакете `YCF_DATA_BUCKET` лежат файлы `autolight-cities.json` и `autolight-postoffices.json`.
+2. Собрать архив (без `node_modules`):
    ```bash
-   yc serverless function version update --id d4en5hu7vpjf143b7kfa --execution-timeout 5s
+   # Windows PowerShell
+   Compress-Archive -Path 'index.js','server.js','data-loader.js','s3-client.js','courier-pricing-data.js','pickup-piont-data.js','zones-data.js','package.json' -DestinationPath 'ycf-deploy.zip' -Force
    ```
-3. Подключить API Gateway (спецификация в `api_gateway.yaml`).
-4. Указать переменные окружения (`OVERRIDE_BUCKET`).
-5. Убедиться, что `checkout.liquid` в InSales указывает на URL API Gateway.
+3. Загрузить архив в бакет:
+   ```bash
+   aws s3 cp ycf-deploy.zip s3://$YCF_DATA_BUCKET/ycf-deploy.zip \
+     --endpoint-url=https://storage.yandexcloud.net
+   ```
+4. Создать версию функции в Yandex Cloud Functions:
+   ```bash
+   yc serverless function version create \
+     --function-id d4ebnep9pn0plurv8g97 \
+     --runtime nodejs22 \
+     --entrypoint index.handler \
+     --memory 256m \
+     --execution-timeout 6s \
+     --package-bucket-name delivery-api-backet \
+     --package-object-name ycf-deploy.zip \
+     --service-account-id <service-account-id> \
+     --environment YCF_DATA_BUCKET=delivery-api-backet,CITIES_JSON_KEY=autolight-cities.json,POSTOFFICES_JSON_KEY=autolight-postoffices.json,OVERRIDE_BUCKET=delivery-api-backet,AWS_ACCESS_KEY_ID=<key-id>,AWS_SECRET_ACCESS_KEY=<secret>
+   ```
+5. Подключить API Gateway (спецификация в `api_gateway.yaml`).
+6. Убедиться, что `checkout.liquid` в InSales указывает на URL API Gateway.
+
+После обновления справочников в бакете изменения применятся в течение 5 минут (in-memory кеш в функции).
 
 ## Разделение посылок для труб ПЭ 25/32 мм
 
@@ -190,3 +257,6 @@ node test-peak-surcharge.js
 - `[DATE] ...` — расчёт даты доставки
 - `[GEOIP] ...` — определение часового пояса клиента
 - `[COURIER] ...` / `[API] ...` — расчёт курьера / ПВЗ, включая разделение на посылки
+- `[CITIES] ...` — загрузка справочника городов из бакета
+- `[PVZ] ...` — загрузка справочника ПВЗ из бакета
+- `[ZONE] ...` — определение зоны доставки по справочнику

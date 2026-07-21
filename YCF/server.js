@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const s3Client = require('./s3-client');
+const { loadCities, loadPostOffices, getLoadedCities, getLoadedPostOffices, normalizeCityName, hasAnyServiceDay, hasSaturdayService } = require('./data-loader');
 
 // ──────────────────────────────────────────────────────────────────────────
 // IN-MEMORY КЕШ ОТВЕТОВ
@@ -109,13 +111,7 @@ async function loadPeakOverride() {
   }
   _overrideFetchPromise = (async () => {
     try {
-      const url = `https://storage.yandexcloud.net/${bucket}/${OVERRIDE_KEY}`;
-      const resp = await fetch(url, { method: 'GET' });
-      if (!resp.ok) {
-        _overrideCache = { ts: Date.now(), value: null };
-        return null;
-      }
-      const data = await resp.json();
+      const data = await s3Client.getObjectJson(bucket, OVERRIDE_KEY);
       _overrideCache = { ts: Date.now(), value: data };
       console.log(`[OVERRIDE] Загружен override:`, JSON.stringify(data));
       return data;
@@ -155,22 +151,11 @@ async function resolvePeakStatus(utcOffsetMinutes) {
   return { isPeak: natural.isPeak, source: 'day-of-week', dayOfWeek: natural.dayOfWeek };
 }
 
-// Загружаем пункты выдачи из встроенного модуля (для надежного деплоя на Netlify)
-let pickupPoints = [];
-try {
-  const { pickupPointsData } = require('./pickup-piont-data');
-  pickupPoints = pickupPointsData || [];
-} catch (error) {
-  console.error('Ошибка загрузки пунктов выдачи из модуля:', error);
-  // Fallback: пробуем загрузить из JSON файла
-  try {
-    const filePath = path.join(__dirname, 'pickup-points.json');
-    const data = fs.readFileSync(filePath, 'utf8');
-    pickupPoints = JSON.parse(data);
-  } catch (e) {
-    console.error('Ошибка загрузки пунктов выдачи из JSON:', e);
-    pickupPoints = [];
-  }
+// Пункты выдачи теперь загружаются из бакета (autolight-postoffices.json) через data-loader.
+// Fallback на pickup-piont-data.js оставлен на случай недоступности бакета.
+function getPickupPoints() {
+  const loaded = getLoadedPostOffices();
+  return loaded && loaded.list ? loaded.list : [];
 }
 
 // Загрузка тарифов курьерской доставки из встроенного модуля (для надёжного деплоя на Netlify)
@@ -502,11 +487,18 @@ function normalizeSettlementName(raw) {
 /**
  * Классифицирует населённый пункт по зонам доставки.
  *
- * Логика:
- *  1. Явный сельский префикс (д., аг., пос.) → village
- *  2. Есть в zones.saturday → saturday (Пн–Сб)
- *  3. Есть в zones.district → district (Пн–Пт)
- *  4. Всё остальное → village (1–2 дня, Пн–Пт)
+ * Новая логика (данные из autolight-cities.json в бакете):
+ *  1. Есть в справочнике Автолайта:
+ *       - все дни обслуживания false → village (не основная сеть)
+ *       - day6 (суббота) true        → saturday (Пн–Сб)
+ *       - иначе                      → district (Пн–Пт)
+ *  2. Fallback на zones-data.js (saturday/district списки)
+ *  3. Явный сельский префикс (д., аг., пос.) без совпадения в справочнике → village
+ *  4. Всё остальное → village
+ *
+ * Важно: агрогородки/деревни, которые есть в основной сети Автолайта
+ * (например, "Колодищи аг."), должны получать зону по справочнику,
+ * а не автоматически попадать в village из-за префикса.
  *
  * @returns {'saturday'|'district'|'village'}
  */
@@ -514,26 +506,49 @@ function classifySettlement(rawName) {
   if (!rawName || !rawName.trim()) return 'district';
 
   const raw = rawName.trim();
+  const clean = normalizeCityName(raw);
 
-  // Явный сельский тип — сразу village
+  // Основной источник — справочник из бакета
+  const loadedCities = getLoadedCities();
+  if (loadedCities && loadedCities.index && clean) {
+    const city = loadedCities.index.get(clean);
+    if (city) {
+      // inMainList — прямой признак основной сети Автолайта.
+      // Если флаг не установлен, но есть рабочие дни, считаем пункт обслуживаемым.
+      const inMainNetwork = city.inMainList || hasAnyServiceDay(city);
+      if (!inMainNetwork) {
+        console.log(`[ZONE] "${raw}" → village (не в основной сети)`);
+        return 'village';
+      }
+      if (city.day6) {
+        console.log(`[ZONE] "${raw}" → saturday (day6=true)`);
+        return 'saturday';
+      }
+      console.log(`[ZONE] "${raw}" → district (основная сеть, суббота=false)`);
+      return 'district';
+    }
+  }
+
+  // Fallback на старые зоны
+  if (clean) {
+    if (deliveryZones.saturday.includes(clean)) {
+      console.log(`[ZONE] "${raw}" → saturday (fallback zones.saturday)`);
+      return 'saturday';
+    }
+    if (deliveryZones.district.includes(clean)) {
+      console.log(`[ZONE] "${raw}" → district (fallback zones.district)`);
+      return 'district';
+    }
+  }
+
+  // Явный сельский тип, не найденный в справочнике — village
   if (VILLAGE_PREFIXES.test(raw)) {
-    console.log(`[ZONE] "${raw}" → village (сельский префикс)`);
+    console.log(`[ZONE] "${raw}" → village (сельский префикс, не найден в справочнике)`);
     return 'village';
   }
 
-  const clean = normalizeSettlementName(raw);
-
-  if (deliveryZones.saturday.includes(clean)) {
-    console.log(`[ZONE] "${raw}" → saturday (в списке saturday)`);
-    return 'saturday';
-  }
-  if (deliveryZones.district.includes(clean)) {
-    console.log(`[ZONE] "${raw}" → district (в списке district)`);
-    return 'district';
-  }
-
-  // Всё остальное — village (деревни, агрогородки, малые населённые пункты)
-  console.log(`[ZONE] "${raw}" → village (не найден в зонах, clean="${clean}")`);
+  // Всё остальное — village
+  console.log(`[ZONE] "${raw}" → village (не найден, clean="${clean}")`);
   return 'village';
 }
 
@@ -1079,6 +1094,14 @@ exports.handler = async (event, context) => {
 
   const requestPath = event.path || '';
 
+  // Подгружаем актуальные справочники Автолайта из бакета.
+  // Кеш и single-flight реализованы внутри data-loader.
+  try {
+    await Promise.all([loadCities(), loadPostOffices()]);
+  } catch (e) {
+    console.warn(`[HANDLER] Не удалось загрузить справочники из бакета: ${e.message}`);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // МАРШРУТ: /api/courier-door — внешний способ доставки «До двери»
   // Вызывается InSales при оформлении заказа (передаёт адрес покупателя)
@@ -1352,7 +1375,7 @@ exports.handler = async (event, context) => {
         return pvzCached;
       }
 
-      const points = city ? findBestCityMatch(city, pickupPoints) : pickupPoints;
+      const points = city ? findBestCityMatch(city, getPickupPoints()) : getPickupPoints();
       
       // Для виджета на странице товара у нас нет суммы заказа, поэтому используем примерную среднюю сумму
       // или минимальные сборы
@@ -1412,8 +1435,8 @@ exports.handler = async (event, context) => {
       if (requestBody.action === 'ping' || requestBody.action === 'getCities' || 
           requestBody.ping === true || requestBody.get_cities === true) {
         
-        const uniqueCities = [...new Set(pickupPoints.map(point => point.city))].sort();
-        
+        const uniqueCities = [...new Set(getPickupPoints().map(point => point.city))].sort();
+
         return {
           statusCode: 200,
           headers: CORS_HEADERS,
@@ -1421,7 +1444,7 @@ exports.handler = async (event, context) => {
             success: true,
             message: 'InSales External Delivery API v2 - Avtolayt Express',
             cities: uniqueCities,
-            pickup_points_count: pickupPoints.length,
+            pickup_points_count: getPickupPoints().length,
             cities_count: uniqueCities.length,
             weight_ranges: {
               '5кг': 10.0,
@@ -1477,7 +1500,7 @@ exports.handler = async (event, context) => {
       }
 
       // Фильтрация ПВЗ по городу
-      const filteredPoints = findBestCityMatch(city, pickupPoints);
+      const filteredPoints = findBestCityMatch(city, getPickupPoints());
 
       console.log(`[API] Найдено ПВЗ в городе "${city}": ${filteredPoints.length}`);
 
@@ -1627,4 +1650,5 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports.calculateCourierPriceForOrder = calculateCourierPriceForOrder;
   module.exports.calculatePriceForOrder = calculatePriceForOrder;
   module.exports.getPipeWeightFromOrderLines = getPipeWeightFromOrderLines;
+  module.exports.classifySettlement = classifySettlement;
 }
