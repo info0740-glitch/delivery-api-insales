@@ -161,15 +161,31 @@ function isPostomat(p) {
   return /citypost\d+/.test(text);
 }
 
+// ПВЗ, которые никогда не показываем (сложная локация, жалобы клиентов).
+const BLACKLISTED_PVZ_IDS = new Set([
+  1, // Минская обл., д. Дегтяревка
+]);
+
 function buildPickupPoints(postOffices) {
   return postOffices
     .filter(p => p && p.code && !p.closed && p.deliveryAvailable !== false)
-    .filter(p => !isPostomat(p))
+    .filter(p => !isPostomat(p) && !BLACKLISTED_PVZ_IDS.has(p.code))
     .map(p => {
       const city = normalizeCityName(p.cityName || '');
       const address = (p.address || '').trim();
       const number = p.postofficeNumber || String(p.code);
       const name = `СППС №${number}`;
+
+      // В справочнике Автолайта:
+      //   - maxWeight = 30  → ПВЗ с лимитом 30 кг
+      //   - maxWeight = 0   → ПВЗ без явного ограничения, трактуем как 50 кг
+      //   - maxWeight отсутствует → fallback 25 кг
+      const rawMax = p.maxWeight;
+      const maxWeightNum = (rawMax === undefined || rawMax === null || rawMax === '')
+        ? null
+        : parseFloat(rawMax);
+      const weightLimit = maxWeightNum === 0 ? 50 : (maxWeightNum || 25);
+
       return {
         id: p.code,
         city,
@@ -177,7 +193,7 @@ function buildPickupPoints(postOffices) {
         address,
         working_hours: p.workTime || '',
         delivery_address: address ? `${address}, Беларусь` : '',
-        weight_limit: parseFloat(p.maxWeight) || 25,
+        weight_limit: weightLimit,
         _raw: p
       };
     });

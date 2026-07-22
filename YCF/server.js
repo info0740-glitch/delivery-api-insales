@@ -341,6 +341,28 @@ function calculatePriceForOrder(totalWeight, orderLines, maxWeight) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// ОПРЕДЕЛЕНИЕ ЕДИНИЧНОГО НЕДЕЛИМОГО ТЯЖЁЛОГО ТОВАРА
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Возвращает вес товара, если в корзине ровно одна строка с quantity === 1.
+ * Такой товар нельзя разбить на несколько посылок, поэтому ПВЗ с
+ * недостаточным weight_limit скрываются. Если в строке отсутствует weight,
+ * используем общий вес заказа как fallback.
+ * Если товаров несколько или quantity > 1 — возвращает null.
+ */
+function getSingleHeavyItemWeight(orderLines, totalWeight) {
+  if (!Array.isArray(orderLines) || orderLines.length !== 1) return null;
+  const line = orderLines[0];
+  if (!line) return null;
+  const qty = parseFloat(line.quantity) || 0;
+  if (qty !== 1) return null;
+  const unitWeight = parseFloat(line.weight) || parseFloat(totalWeight) || 0;
+  if (unitWeight > 0) return unitWeight;
+  return null;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // ЗОНИРОВАНИЕ НАСЕЛЁННЫХ ПУНКТОВ — загружается из zones.json
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1500,7 +1522,17 @@ exports.handler = async (event, context) => {
       }
 
       // Фильтрация ПВЗ по городу
-      const filteredPoints = findBestCityMatch(city, getPickupPoints());
+      let filteredPoints = findBestCityMatch(city, getPickupPoints());
+
+      // Редкий edge case: один неделимый тяжёлый товар (например, мотопомпа 32 кг).
+      // Его нельзя разбить на 2 посылки, поэтому скрываем ПВЗ с недостаточным лимитом.
+      console.log(`[API] order_lines: ${JSON.stringify(order.order_lines)}, totalWeight=${totalWeight}`);
+      const singleHeavyWeight = getSingleHeavyItemWeight(order.order_lines, totalWeight);
+      console.log(`[API] singleHeavyWeight=${singleHeavyWeight}`);
+      if (singleHeavyWeight) {
+        filteredPoints = filteredPoints.filter(p => (p.weight_limit || 50) >= singleHeavyWeight);
+        console.log(`[API] Единичный тяжёлый товар ${singleHeavyWeight} кг — скрыто ПВЗ с лимитом < ${singleHeavyWeight} кг, осталось ${filteredPoints.length}`);
+      }
 
       console.log(`[API] Найдено ПВЗ в городе "${city}": ${filteredPoints.length}`);
 

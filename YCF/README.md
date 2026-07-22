@@ -86,7 +86,15 @@ node scripts/override.js status
 - AWS CLI, настроенный для Yandex Cloud (`aws configure`)
 - Переменная `OVERRIDE_BUCKET` в окружении
 
-### Альтернатива: ручная загрузка
+### Альтернатива: загрузка через SDK-скрипт (без AWS CLI)
+
+```bash
+OVERRIDE_BUCKET=delivery-api-backet node scripts/upload-peak-override.js
+```
+
+Скрипт использует AWS SDK v3 (уже в зависимостях), проверяет JSON на валидность и загружает `peak-override.json` в бакет.
+
+### Альтернатива: ручная загрузка через AWS CLI
 
 ```bash
 aws s3 cp peak-override.json s3://$OVERRIDE_BUCKET/peak-override.json \
@@ -113,6 +121,11 @@ aws s3 cp peak-override.json s3://$OVERRIDE_BUCKET/peak-override.json \
 
 - **`autolight-postoffices.json`** — справочник ПВЗ с актуальными адресами, режимом работы и лимитом веса.
   - Почтоматы с адресами вида `CityPostXXX` исключаются из выдачи покупателю.
+  - `maxWeight` маппится в `weight_limit`:
+    - `maxWeight: 30` → ПВЗ с лимитом **30 кг**.
+    - `maxWeight: 0` → ПВЗ без явного ограничения, трактуется как **50 кг**.
+    - `maxWeight` отсутствует → fallback **25 кг**.
+  - ПВЗ можно заблокировать по `code` в `BLACKLISTED_PVZ_IDS` (`data-loader.js`) — например, точки в труднодоступных локациях.
 
 Загрузчик (`data-loader.js`) кеширует справочники в памяти на 5 минут и использует single-flight, чтобы не ходить в Object Storage по нескольку раз на запрос. При недоступности бакета автоматически используются встроенные fallback-справочники (`zones-data.js`, `pickup-piont-data.js`).
 
@@ -153,9 +166,12 @@ node test-handler.js
 - зонирование по справочнику Автолайт (`saturday` / `district` / `village`),
 - деревни с обслуживанием без сельской надбавки,
 - маппинг ПВЗ из `autolight-postoffices.json` в текущий формат,
+- `maxWeight: 0` → `weight_limit: 50 кг`,
 - исключение почтоматов `CityPostXXX` из выдачи,
+- исключение заблокированных ПВЗ по `code`,
 - fallback при недоступности бакета,
-- интеграционные проверки эндпоинтов `/api/courier-door` и `/api/pickup-points`.
+- интеграционные проверки эндпоинтов `/api/courier-door` и `/api/pickup-points`,
+- edge case с единичным тяжёлым товаром (скрытие ПВЗ с недостаточным лимитом).
 
 ## Настройка Yandex Object Storage (один раз)
 
@@ -247,6 +263,28 @@ node test-handler.js
 1. В `server.js` добавить `product_id` в `PIPE_PRODUCT_IDS`.
 2. Перезадеплоить функцию в YCF.
 3. (Опционально) Обновить текст в `checkout.liquid`, если нужно изменить wording.
+
+## Единичный неделимый тяжёлый товар
+
+Редкий edge case: в корзине одна строка с `quantity === 1` и весом больше лимита ПВЗ (например, мотопомпа 32 кг при лимите ПВЗ 25/30 кг). Такой товар физически нельзя разделить на 2 посылки, поэтому ПВЗ с недостаточным `weight_limit` скрываются.
+
+### Как это работает
+
+В `server.js` функция `getSingleHeavyItemWeight(orderLines, totalWeight)`:
+1. Проверяет, что `order_lines.length === 1`.
+2. Проверяет, что `quantity === 1`.
+3. Берёт вес товара из `line.weight` или fallback на `order.total_weight`.
+4. Если условия выполнены — возвращает вес товара.
+
+Далее в обработчике ПВЗ:
+```js
+filteredPoints = filteredPoints.filter(p => (p.weight_limit || 50) >= singleHeavyWeight);
+```
+
+### Пример
+
+- **Мотопомпа 32 кг, 1 шт.** → скрываются ПВЗ с `weight_limit < 32 кг` (например, 25 и 30 кг), остаются только ПВЗ с `weight_limit ≥ 32 кг` (50 кг).
+- **3 товара по 25 кг** (`quantity === 3`) → фильтр не срабатывает, заказ разбивается на посылки по весу, покупатель видит все ПВЗ и выбирает вариант.
 
 ## Логи и отладка
 

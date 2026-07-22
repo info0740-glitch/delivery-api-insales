@@ -23,6 +23,10 @@ function setMock(key, data) {
   _mockResponses.set(key, data);
 }
 
+function clearMocks() {
+  _mockResponses.clear();
+}
+
 async function runTests() {
   let passed = 0;
   let failed = 0;
@@ -155,6 +159,72 @@ async function runTests() {
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body), 'Должен быть массив');
     assert.ok(body.length > 0, 'ПВЗ в Минске должны быть');
+  });
+
+  // ─── Edge case: единичный тяжёлый товар (мотопомпа) ───
+  await test('InSales ПВЗ: единичный товар 32 кг — скрываются ПВЗ с лимитом 30 кг', async () => {
+    clearMocks();
+    setMock('autolight-cities.json', cities);
+    setMock('autolight-postoffices.json', {
+      result: [
+        { code: 97001, postofficeNumber: '97001', cityName: 'Минск г.', address: 'г.Минск, ул.Л.Беды 46', maxWeight: 30, workTime: 'пн-вс 07:00-23:00', deliveryAvailable: true, closed: false },
+        { code: 97002, postofficeNumber: '97002', cityName: 'Минск г.', address: 'г.Минск, пр.Независимости 100', maxWeight: 50, workTime: 'пн-вс 07:00-23:00', deliveryAvailable: true, closed: false }
+      ]
+    });
+
+    const event = {
+      httpMethod: 'POST',
+      path: '/api/pickup-points',
+      headers: {},
+      body: JSON.stringify({
+        order: {
+          shipping_address: { city: 'Минск' },
+          total_weight: 32,
+          total_price: 100,
+          order_lines: [{ product_id: 999, quantity: 1, weight: 32 }]
+        }
+      })
+    };
+    const res = await handler(event, {});
+    assert.strictEqual(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.length, 1, 'Должен остаться только ПВЗ с лимитом 50 кг');
+    const parcelsCount = body[0].fields_values.find(fv => fv.handle === 'parcels_count');
+    assert.ok(parcelsCount && parcelsCount.value === '1', 'Оставшийся ПВЗ должен вместить товар одной посылкой');
+  });
+
+  await test('InSales ПВЗ: 3 товара по 25 кг — разбиваются, ПВЗ с лимитом 30 кг остаются', async () => {
+    clearMocks();
+    setMock('autolight-cities.json', cities);
+    setMock('autolight-postoffices.json', {
+      result: [
+        { code: 97001, postofficeNumber: '97001', cityName: 'Минск г.', address: 'г.Минск, ул.Л.Беды 46', maxWeight: 30, workTime: 'пн-вс 07:00-23:00', deliveryAvailable: true, closed: false },
+        { code: 97002, postofficeNumber: '97002', cityName: 'Минск г.', address: 'г.Минск, пр.Независимости 100', maxWeight: 50, workTime: 'пн-вс 07:00-23:00', deliveryAvailable: true, closed: false }
+      ]
+    });
+
+    const event = {
+      httpMethod: 'POST',
+      path: '/api/pickup-points',
+      headers: {},
+      body: JSON.stringify({
+        order: {
+          shipping_address: { city: 'Минск' },
+          total_weight: 75,
+          total_price: 100,
+          order_lines: [{ product_id: 999, quantity: 3, weight: 25 }]
+        }
+      })
+    };
+    const res = await handler(event, {});
+    assert.strictEqual(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.length, 2, 'Оба ПВЗ должны остаться — товары можно разделить');
+    const limit30Tariff = body.find(t => {
+      const breakdown = t.fields_values.find(fv => fv.handle === 'parcels_breakdown');
+      return breakdown && breakdown.value.includes('30 кг + 30 кг + 15 кг');
+    });
+    assert.ok(limit30Tariff, 'ПВЗ с лимитом 30 кг (3 посылки) должен присутствовать');
   });
 
   console.log(`\n📊 Результат: ${passed} пройдено, ${failed} не пройдено`);

@@ -159,6 +159,62 @@ async function runTests() {
     assert.ok(point.address.includes('Л.Беды'));
   });
 
+  await test('ПВЗ с maxWeight=0 получает лимит 50 кг', async () => {
+    resetDataLoaderCache();
+    clearMocks();
+    setMock('autolight-cities.json', { result: [] });
+    setMock('autolight-postoffices.json', {
+      result: [
+        {
+          code: 97,
+          postofficeNumber: '001',
+          cityName: 'Минск г.',
+          address: 'г.Минск, ул.Л.Беды 46',
+          maxWeight: 0,
+          workTime: 'пн-вс 07:00-23:00',
+          deliveryAvailable: true,
+          closed: false
+        }
+      ]
+    });
+    const pvz = await loadPostOffices();
+    assert.strictEqual(pvz.list.length, 1);
+    assert.strictEqual(pvz.list[0].weight_limit, 50);
+  });
+
+  await test('Заблокированные ПВЗ не показываются', async () => {
+    resetDataLoaderCache();
+    clearMocks();
+    setMock('autolight-cities.json', { result: [] });
+    setMock('autolight-postoffices.json', {
+      result: [
+        {
+          code: 1,
+          postofficeNumber: '001',
+          cityName: 'Минск г.',
+          address: 'Минская обл.,Минский р-н,Ждановичский с/c,51,р-н д.Дегтяревка',
+          maxWeight: 0,
+          workTime: 'пн-вс 07:00-23:00',
+          deliveryAvailable: true,
+          closed: false
+        },
+        {
+          code: 2,
+          postofficeNumber: '002',
+          cityName: 'Минск г.',
+          address: 'г.Минск, ул.Немига 5',
+          maxWeight: 30,
+          workTime: 'пн-пт 09:00-21:00',
+          deliveryAvailable: true,
+          closed: false
+        }
+      ]
+    });
+    const pvz = await loadPostOffices();
+    assert.strictEqual(pvz.list.length, 1);
+    assert.strictEqual(pvz.list[0].id, 2);
+  });
+
   await test('Почтоматы CityPost не попадают в ПВЗ', async () => {
     resetDataLoaderCache();
     clearMocks();
